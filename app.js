@@ -565,30 +565,122 @@
     flow.replaceChildren();
     flow.dir = S.rtl ? 'rtl' : 'ltr';
     flow.classList.toggle('nonums', !SET.nums);
-    flow.append(h('h2', { class: 'sec', dir: S.rtl ? 'rtl' : 'ltr' }, S.rtl ? S.data.heRef : S.data.ref));
-    if (note) flow.append(h('p', { class: 'note' }, note));
+    const head = [h('h2', { class: 'sec', dir: S.rtl ? 'rtl' : 'ltr' }, S.rtl ? S.data.heRef : S.data.ref)];
+    if (note) head.push(h('p', { class: 'note' }, note));
 
-    let last = null;
-    if (mode === 'both') {
+    // Side-by-side bilingual text is paginated row by row in layoutBoth().
+    S.both = mode === 'both';
+    if (S.both) {
+      S.head = head;
+      S.rows = [];
       const len = Math.max(he.length, en.length);
       for (let i = 0; i < len; i++) {
         if (!he[i] && !en[i]) continue;
-        const d = h('div', { class: 'pair' });
-        if (he[i]) d.append(last = para(he[i], 'he', i, true));
-        if (en[i]) d.append(last = para(en[i], 'en', he[i] ? null : i, false));
-        flow.append(d);
+        S.rows.push({ he: he[i] ? cleanHtml(he[i]) : '', en: en[i] ? cleanHtml(en[i]) : '', i });
       }
-    } else {
-      const arr = mode === 'en' ? en : he;
-      arr.forEach((t, i) => { if (t) flow.append(last = para(t, mode === 'en' ? 'en' : 'he', i, S.rtl)); });
+      return;
     }
+    flow.append(...head);
+
+    let last = null;
+    const arr = mode === 'en' ? en : he;
+    arr.forEach((t, i) => { if (t) flow.append(last = para(t, mode === 'en' ? 'en' : 'he', i, S.rtl)); });
     if (!last) flow.append(last = h('p', { class: 'note' }, 'This section has no text on Sefaria.'));
     last.append(h('span', { id: 'end' }));
   }
 
+  function cleanHtml(raw) { const d = document.createElement('div'); d.append(clean(raw)); return d.innerHTML; }
+  const wordCount = html => html.replace(/<[^>]+>/g, ' ').split(/\s+/).filter(Boolean).length;
+  // Split HTML after n words, closing and reopening any inline tags that span the cut.
+  function splitHtml(html, n) {
+    const toks = html.split(/(<[^>]+>|\s+)/).filter(Boolean);
+    const stack = [];
+    let i = 0, count = 0, headStr = '';
+    for (; i < toks.length; i++) {
+      const t = toks[i];
+      if (t[0] === '<') {
+        const m = t.match(/^<(\/)?([a-z0-9]+)/i);
+        if (m && !/^br$/i.test(m[2])) { if (m[1]) stack.pop(); else stack.push(m[2].toLowerCase()); }
+        headStr += t;
+      } else if (/^\s+$/.test(t)) headStr += t;
+      else { if (count === n) break; count++; headStr += t; }
+    }
+    const close = stack.slice().reverse().map(t => `</${t}>`).join('');
+    const open = stack.map(t => `<${t}>`).join('');
+    return [headStr.trim() + close, open + toks.slice(i).join('').trim()];
+  }
+  function rowEl(r) {
+    const row = h('div', { class: 'brow' });
+    const he = h('p', { class: 'seg he', dir: 'rtl', lang: 'he' });
+    if (r.i != null && r.he) he.append(h('span', { class: 'n' }, gem(r.i + 1, false)));
+    he.insertAdjacentHTML('beforeend', r.he);
+    const en = h('p', { class: 'seg en', dir: 'ltr', lang: 'en' });
+    if (r.i != null && !r.he) en.append(h('span', { class: 'n' }, String(r.i + 1)));
+    en.insertAdjacentHTML('beforeend', r.en);
+    row.append(he, en);
+    return row;
+  }
+  // Fit as much of row r as possible onto page (height H): same fraction of words on each side.
+  function splitRow(r, page, H, force) {
+    const nh = wordCount(r.he), ne = wordCount(r.en);
+    let lo = 0, hi = 1, best = null;
+    for (let k = 0; k < 14; k++) {
+      const f = (lo + hi) / 2;
+      const a = { he: splitHtml(r.he, Math.round(nh * f))[0], en: splitHtml(r.en, Math.round(ne * f))[0], i: r.i };
+      const el = rowEl(a);
+      page.append(el);
+      const fits = page.offsetHeight <= H;
+      el.remove();
+      if (fits) { best = f; lo = f; } else hi = f;
+    }
+    if (best == null || best < (force ? 0.0001 : 0.12)) {
+      if (!force) return null;
+      best = Math.max(best || 0, 1 / Math.max(nh, ne, 1));
+    }
+    const kh = Math.max(force ? 1 : 0, Math.round(nh * best)), ke = Math.round(ne * best);
+    const [ha, hb] = splitHtml(r.he, Math.min(kh, nh)), [ea, eb] = splitHtml(r.en, ke);
+    return [{ he: ha, en: ea, i: r.i }, { he: hb, en: eb, i: null }];
+  }
+  function layoutBoth(W, H) {
+    const G = 48;
+    S.step = W + G;
+    flow.replaceChildren();
+    flow.style.width = W + 'px';
+    flow.style.height = H + 'px';
+    flow.style.columnWidth = 'auto';
+    flow.style.columnGap = 'normal';
+    flow.classList.toggle('narrow', W < 560);
+    let n = 0;
+    const newPage = () => {
+      const p = h('div', { class: 'bpage', style: `width:${W}px;left:${(S.rtl ? -1 : 1) * n * S.step}px` });
+      n++; flow.append(p); return p;
+    };
+    let page = newPage();
+    page.append(...S.head);
+    const queue = S.rows.slice();
+    while (queue.length) {
+      const r = queue.shift();
+      const el = rowEl(r);
+      page.append(el);
+      if (page.offsetHeight <= H) continue;
+      el.remove();
+      const empty = !page.querySelector('.brow');
+      const parts = splitRow(r, page, H, empty && page.children.length === 0);
+      if (parts) { page.append(rowEl(parts[0])); if (wordCount(parts[1].he) + wordCount(parts[1].en)) queue.unshift(parts[1]); }
+      else if (empty && page.children.length) { const p2 = splitRow(r, page, H, true); page.append(rowEl(p2[0])); queue.unshift(p2[1]); }
+      else queue.unshift(r);
+      if (queue.length) page = newPage();
+    }
+    if (!S.rows.length) page.append(h('p', { class: 'note' }, 'This section has no text on Sefaria.'));
+    S.pages = n;
+  }
+
   function layout() {
     const W = clip.clientWidth, H = clip.clientHeight;
-    if (!W || !H || !$('end')) return;
+    if (!W || !H) return;
+    if (S.both) return layoutBoth(W, H);
+    flow.classList.remove('narrow');
+    if (!$('end')) return;
     const two = SET.cols === '2' ? W >= 360 : SET.cols === '1' ? false : W >= 640;
     const G = two ? Math.round(Math.min(80, Math.max(32, W * 0.07))) : 48;
     const colW = two ? (W - G) / 2 : W;
