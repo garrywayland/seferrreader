@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Sefer Reader</title>
+<meta name="description" content="A distraction-free, page-by-page reader for any sefer on Sefaria.">
+<meta name="theme-color" content="#f6f6f2" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#141517" media="(prefers-color-scheme: dark)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Sefer">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="preconnect" href="https://www.sefaria.org" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Frank+Ruhl+Libre:wght@400;500;700&family=Crimson+Pro:ital,wght@0,400;0,600;1,400&display=swap">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body class="in-lib">
+
+<!-- Library: home, categories, book pages -->
+<main id="lib"></main>
+
+<!-- Reader -->
+<div id="reader" aria-live="polite" hidden>
+  <div id="clip"><div id="flow" class="instant"></div></div>
+</div>
+<div id="bar" hidden></div>
+<div id="status" hidden><span class="t" id="st-title"></span><span id="st-page"></span></div>
+<div id="toast"></div>
+
+<div id="msg" hidden>
+  <div class="box">
+    <div class="msg-mark">ספר</div>
+    <p id="msg-text">Opening…</p>
+    <p class="sub" id="msg-sub"></p>
+    <div class="row" id="msg-actions"></div>
+  </div>
+</div>
+
+<!-- Settings sheet (shared by library and reader) -->
+<div id="scrim" hidden></div>
+<div id="menu" role="dialog" aria-label="Reading settings" hidden>
+  <div class="head">
+    <div class="head-title">
+      <div class="book" id="m-he"></div>
+      <div class="en-title" id="m-en"></div>
+    </div>
+    <button class="btn" id="m-close">Close</button>
+  </div>
+
+  <div class="reader-only row" id="m-links">
+    <a class="btn" href="#/" id="m-home">Library</a>
+    <a class="btn" href="#/" id="m-about">About this book</a>
+  </div>
+
+  <div class="reader-only">
+    <label class="lbl" for="m-q">Open a sefer</label>
+    <input type="search" id="m-q" placeholder="e.g. Berakhot, Mishnah Berurah, Genesis 12" autocomplete="off" enterkeyhint="go">
+    <div class="sugg" id="m-sugg"></div>
+  </div>
+
+  <div class="reader-only" id="m-goto">
+    <label class="lbl" for="m-sec">Go to</label>
+    <div class="secnav">
+      <button class="btn" id="m-prevsec" aria-label="Previous section">‹</button>
+      <select id="m-sec"></select>
+      <button class="btn" id="m-nextsec" aria-label="Next section">›</button>
+    </div>
+  </div>
+
+  <div class="lib-only preview" id="m-preview">
+    <p class="he" dir="rtl" lang="he">יְסוֹד הַחֲסִידוּת וְשֹׁרֶשׁ הָעֲבוֹדָה הַתְּמִימָה הוּא שֶׁיִּתְבָּרֵר וְיִתְאַמֵּת אֵצֶל הָאָדָם מָה חוֹבָתוֹ בְּעוֹלָמוֹ.</p>
+    <p class="en" lang="en">The foundation of piety and the root of perfect service is for a man to clarify and realize as truth what is his obligation in his world.</p>
+  </div>
+
+  <div class="opts">
+    <div class="opt">
+      <span class="lbl">Text</span>
+      <div class="seg-group" id="m-lang">
+        <button class="seg-btn" data-v="he">עברית</button>
+        <button class="seg-btn" data-v="both">Both</button>
+        <button class="seg-btn" data-v="en">English</button>
+      </div>
+    </div>
+    <div class="opt">
+      <span class="lbl">Theme</span>
+      <div class="seg-group" id="m-theme">
+        <button class="seg-btn" data-v="auto">Auto</button>
+        <button class="seg-btn" data-v="light">Light</button>
+        <button class="seg-btn" data-v="sepia">Sepia</button>
+        <button class="seg-btn" data-v="dark">Dark</button>
+      </div>
+    </div>
+    <div class="opt">
+      <label class="lbl" for="m-hefont">Hebrew font</label>
+      <select id="m-hefont"></select>
+    </div>
+    <div class="opt">
+      <label class="lbl" for="m-enfont">English font</label>
+      <select id="m-enfont"></select>
+    </div>
+    <div class="opt">
+      <label class="lbl" for="m-size">Text size <span class="val" id="m-size-v"></span></label>
+      <input type="range" id="m-size" min="14" max="40" step="1">
+    </div>
+    <div class="opt">
+      <label class="lbl" for="m-lh">Line spacing <span class="val" id="m-lh-v"></span></label>
+      <input type="range" id="m-lh" min="1.3" max="2.3" step="0.05">
+    </div>
+    <div class="opt">
+      <label class="lbl" for="m-margin">Margins <span class="val" id="m-margin-v"></span></label>
+      <input type="range" id="m-margin" min="0" max="5" step="1">
+    </div>
+    <div class="opt">
+      <span class="lbl">Columns</span>
+      <div class="seg-group" id="m-cols">
+        <button class="seg-btn" data-v="auto">Auto</button>
+        <button class="seg-btn" data-v="1">One</button>
+        <button class="seg-btn" data-v="2">Two</button>
+      </div>
+    </div>
+  </div>
+
+  <label class="toggle"><input type="checkbox" id="m-nums"> Show verse / segment numbers</label>
+
+  <p class="help">In the reader, tap the left side for the next page and the right side to go back (reversed in English). Tap the middle for this menu. Swipe, arrow keys and the space bar also turn pages. Settings and your place are saved on this device.</p>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
