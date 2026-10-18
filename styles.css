@@ -303,7 +303,7 @@ body.in-reader #menu .lib-only { display: none; }
   #print .comm-block { margin: 0 0 .6em; font-size: .78em; border-color: #bbb; }
   #print .comm { line-height: 1.5; margin-bottom: .3em; }
   #print .note { color: #555; }
-  .p-both .brow { margin: 0 0 .45em; background-image: linear-gradient(#bbb, #bbb); }
-  .p-both .comm-row { border-color: #bbb; }
+  .p-both .brow { margin: 0 0 .45em; background: linear-gradient(#bbb, #bbb) center / .4pt 100% no-repeat; }
+  .p-both .comm-row { background: none; border-color: #bbb; }
   .p-both .sec { text-align: center; }
 }
