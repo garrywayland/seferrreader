@@ -126,9 +126,38 @@
     </div>
   </div>
 
+  <div class="opts">
+    <div class="opt">
+      <span class="lbl">Vowels &amp; trop</span>
+      <div class="seg-group" id="m-vowels">
+        <button class="seg-btn" data-v="all">All</button>
+        <button class="seg-btn" data-v="notrop">No trop</button>
+        <button class="seg-btn" data-v="none">No nikud</button>
+      </div>
+    </div>
+    <div class="opt">
+      <span class="lbl">Alignment</span>
+      <div class="seg-group" id="m-align">
+        <button class="seg-btn" data-v="auto">Auto</button>
+        <button class="seg-btn" data-v="justify">Justified</button>
+        <button class="seg-btn" data-v="start">Ragged</button>
+      </div>
+    </div>
+    <div class="opt">
+      <label class="lbl" for="m-ahead">Save ahead for offline</label>
+      <select id="m-ahead">
+        <option value="1">Next section only</option>
+        <option value="5">Next 5 sections</option>
+        <option value="10">Next 10 sections</option>
+        <option value="25">Next 25 sections</option>
+        <option value="50">Next 50 sections</option>
+      </select>
+    </div>
+  </div>
+
   <label class="toggle"><input type="checkbox" id="m-nums"> Show verse / segment numbers</label>
 
-  <p class="help">In the reader, tap the left side for the next page and the right side to go back (reversed in English). Tap the middle for this menu. Swipe, arrow keys and the space bar also turn pages. Settings and your place are saved on this device.</p>
+  <p class="help">In the reader, tap the left side for the next page and the right side to go back (reversed in English). Tap the middle for this menu. Swipe, arrow keys and the space bar also turn pages. Settings and your place are saved on this device. Sections you read, the ones after them, and books you download stay available offline.</p>
 </div>
 
 <script src="app.js"></script>

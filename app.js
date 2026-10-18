@@ -4,7 +4,10 @@
   const API = 'https://www.sefaria.org/api';
   const KEY_SET = 'sefer-reader-settings';
   const KEY_HIST = 'sefer-reader-history';
-  const lib = $('lib'), reader = $('reader'), clip = $('clip'), flow = $('flow');
+  const libEl = $('lib'), reader = $('reader'), clip = $('clip'), flow = $('flow');
+
+  // Fill the library view; null/false children are skipped.
+  const setLib = (...kids) => libEl.replaceChildren(...kids.flat().filter(Boolean));
 
   // ================= Settings =================
   const HE_FONTS = [
@@ -22,20 +25,34 @@
     ['Inter', 'Inter (sans)'],
   ];
   const MARGINS = [0, 12, 32, 56, 88, 128];
-  const DEFAULTS = { lang: 'he', theme: 'auto', heFont: 'Frank Ruhl Libre', enFont: 'Crimson Pro', size: 21, lh: 1.78, margin: 2, cols: 'auto', nums: true };
+  const DEFAULTS = { lang: 'he', theme: 'auto', heFont: 'Frank Ruhl Libre', enFont: 'Crimson Pro', size: 21, lh: 1.78, margin: 2, cols: 'auto', nums: true, vowels: 'all', align: 'auto', ahead: 10, yomiHidden: [] };
   const SET = Object.assign({}, DEFAULTS, readJSON(KEY_SET, {}));
 
   function readJSON(k, fallback) { try { const v = JSON.parse(localStorage.getItem(k)); return v == null ? fallback : v; } catch { return fallback; } }
   function writeJSON(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} }
 
-  const loadedFonts = new Set(['Frank Ruhl Libre', 'Crimson Pro']);
+  const loadedFonts = new Map([['Frank Ruhl Libre', Promise.resolve()], ['Crimson Pro', Promise.resolve()]]);
   function ensureFont(family) {
-    if (loadedFonts.has(family)) return;
-    loadedFonts.add(family);
-    const l = document.createElement('link');
-    l.rel = 'stylesheet';
-    l.href = `https://fonts.googleapis.com/css2?family=${family.replace(/ /g, '+')}:wght@400;700&display=swap`;
-    document.head.append(l);
+    if (!loadedFonts.has(family)) {
+      loadedFonts.set(family, new Promise(res => {
+        const l = document.createElement('link');
+        l.rel = 'stylesheet';
+        l.href = `https://fonts.googleapis.com/css2?family=${family.replace(/ /g, '+')}:wght@400;700&display=swap`;
+        l.onload = l.onerror = () => res();
+        document.head.append(l);
+        setTimeout(res, 4000);
+      }));
+    }
+    return loadedFonts.get(family);
+  }
+  // Fonts that draw cantillation marks properly; others fall back to Noto Serif Hebrew when trop is shown.
+  const TROP_FONTS = new Set(['Noto Serif Hebrew']);
+  const TROP_RE = /[\u0591-\u05AF]/;
+  function prepHe(t) {
+    if (!t) return t;
+    if (SET.vowels === 'notrop' || SET.vowels === 'none') t = t.replace(/[\u0591-\u05AF\u05BD]/g, '');
+    if (SET.vowels === 'none') t = t.replace(/[\u05B0-\u05BC\u05BF\u05C1\u05C2\u05C4\u05C5\u05C7]/g, '');
+    return t;
   }
   function applySettings() {
     ensureFont(SET.heFont); ensureFont(SET.enFont);
@@ -184,6 +201,20 @@
     const raw = await getJSON(`${API}/shape/${enc(title)}`);
     return (Array.isArray(raw) ? raw : [raw]).filter(x => x && x.title && 'chapters' in x);
   });
+  function getCalendar() {
+    let tz = 'UTC';
+    try { tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'; } catch {}
+    const diaspora = tz === 'Asia/Jerusalem' ? 0 : 1;
+    const d = new Date();
+    const day = `year=${d.getFullYear()}&month=${d.getMonth() + 1}&day=${d.getDate()}`;
+    return once('cal:' + day, async () => {
+      const r = await getJSON(`${API}/calendars?diaspora=${diaspora}&timezone=${encodeURIComponent(tz)}&${day}`);
+      return (r.calendar_items || [])
+        .map(it => ({ ...it, ref: it.ref || (Array.isArray(it.refs) && it.refs[0]) || null, title: it.title || { en: it.category || '' } }))
+        .filter(it => it.ref && it.title && it.title.en)
+        .sort((a, b) => (a.order || 0) - (b.order || 0));
+    });
+  }
   const getIndex = title => once('i:' + title, () => getJSON(`${API}/v2/raw/index/${enc(title)}`));
 
   // Table of contents: the whole library tree, cached in the browser for a day.
@@ -262,7 +293,7 @@
     const r = mode === 'reader';
     document.body.classList.toggle('in-reader', r);
     document.body.classList.toggle('in-lib', !r);
-    lib.hidden = r; reader.hidden = !r; $('status').hidden = !r; $('bar').hidden = !r;
+    libEl.hidden = r; reader.hidden = !r; $('status').hidden = !r; $('bar').hidden = !r;
     if (!r) hideMsg();
   }
 
@@ -326,11 +357,40 @@
           } }, '×'));
         return card;
       }))) : null;
-    lib.replaceChildren(
-      masthead(), searchBox(false), cont,
+    const today = h('div', { class: 'yomi' }, loadingEl("Loading today's learning…"));
+    const editBtn = h('button', { class: 'linkish', onclick: () => {
+      const on = today.classList.toggle('editing');
+      editBtn.textContent = on ? 'Done' : 'Choose';
+    } }, 'Choose');
+    setLib(
+      masthead(),
+      navigator.onLine === false ? h('p', { class: 'offline-note' }, "You're offline. Books you've downloaded or recently read still open.") : null,
+      searchBox(false), cont,
+      h('section', { class: 'lib-section' }, h('h2', { class: 'with-action' }, h('span', null, "Today's learning"), editBtn), today),
       h('section', { class: 'lib-section' }, h('h2', null, 'Browse the library'), cats),
       foot());
     window.scrollTo(0, 0);
+    getCalendar().then(items => {
+      if (tok !== viewToken) return;
+      const cards = items.map(it => {
+        const key = it.title.en;
+        const a = h('a', { class: 'yomi-card' + (SET.yomiHidden.includes(key) ? ' off' : ''), href: refHash(it.ref) },
+          h('span', { class: 'y-top' }, h('span', { class: 'y-en' }, it.title.en), h('span', { class: 'y-he', lang: 'he' }, it.title.he || '')),
+          h('span', { class: 'y-val', lang: 'he', dir: 'rtl' }, (it.displayValue && it.displayValue.he) || it.heRef || it.ref),
+          h('span', { class: 'y-sub' }, (it.displayValue && it.displayValue.en) || it.ref),
+          h('span', { class: 'y-check', 'aria-hidden': 'true' }));
+        a.addEventListener('click', ev => {
+          if (!today.classList.contains('editing')) return;
+          ev.preventDefault();
+          const off = a.classList.toggle('off');
+          SET.yomiHidden = off ? [...new Set([...SET.yomiHidden, key])] : SET.yomiHidden.filter(x => x !== key);
+          writeJSON(KEY_SET, SET);
+        });
+        return a;
+      });
+      today.replaceChildren(...cards);
+      if (!cards.length) today.replaceChildren(h('div', { class: 'loading' }, "Sefaria didn't list any learning for today."));
+    }).catch(e => { if (tok === viewToken) today.replaceChildren(errorEl(e, renderHome)); });
     getTOC().then(toc => {
       if (tok !== viewToken) return;
       cats.replaceChildren(...toc.filter(c => c && c.contents).map(c =>
@@ -356,11 +416,11 @@
   async function renderCategory(path) {
     const tok = ++viewToken;
     setMode('lib');
-    lib.replaceChildren(masthead(), loadingEl());
-    try { await getTOC(); } catch (e) { if (tok === viewToken) lib.replaceChildren(masthead(), errorEl(e, () => renderCategory(path))); return; }
+    setLib(masthead(), loadingEl());
+    try { await getTOC(); } catch (e) { if (tok === viewToken) setLib(masthead(), errorEl(e, () => renderCategory(path))); return; }
     if (tok !== viewToken) return;
     const node = findCat(path);
-    if (!node) { lib.replaceChildren(masthead(), errorEl({ code: 'not_found' }, renderHome)); return; }
+    if (!node) { setLib(masthead(), errorEl({ code: 'not_found' }, renderHome)); return; }
     document.title = `${node.category} · Sefer Reader`;
     const color = catColor(path[0]);
     const body = h('div', { class: 'list' });
@@ -384,7 +444,7 @@
           : h('p', { class: 'item-desc' }, h('a', { href: catHash(sub) }, `${countBooks(c)} works →`))));
     });
     flushBooks();
-    lib.replaceChildren(
+    setLib(
       masthead(), searchBox(false), crumbs(path.slice(0, -1)),
       h('div', { class: 'page-head', style: `--c:${color}` },
         h('div', { class: 'names' }, h('h1', null, node.category), h('span', { class: 'he-name', lang: 'he' }, node.heCategory || '')),
@@ -410,7 +470,7 @@
   async function renderBook(title) {
     const tok = ++viewToken;
     setMode('lib');
-    lib.replaceChildren(masthead(), loadingEl('Loading…'));
+    setLib(masthead(), loadingEl('Loading…'));
     getTOC().catch(() => {});
     let shapes = [], idx = null;
     const [sR, iR] = await Promise.allSettled([getShape(title), getIndex(title)]);
@@ -452,7 +512,7 @@
       h('a', { href: refHash(s.ref), class: hist && hist.ref === s.ref ? 'here' : null, title: s.ref },
         h('span', { class: 'h', lang: 'he' }, s.short), h('span', { class: 'e' }, s.en)))) : null;
 
-    lib.replaceChildren(
+    setLib(
       masthead(), searchBox(false), crumbs(path),
       h('div', { class: 'page-head', style: `--c:${catColor(path[0])}` },
         h('div', { class: 'names' }, h('h1', null, title), h('span', { class: 'he-name', lang: 'he', dir: 'rtl' }, heTitle)),
@@ -461,7 +521,8 @@
         h('div', { class: 'actions' },
           hist ? h('a', { class: 'btn primary', href: refHash(hist.ref) }, 'Continue at ', h('span', { lang: 'he', dir: 'rtl' }, hist.heRef || hist.ref)) : null,
           h('a', { class: 'btn' + (hist ? '' : ' primary'), href: refHash(firstRef) }, hist ? 'Start from the beginning' : 'Start reading'),
-          h('button', { class: 'btn', onclick: () => openMenu() }, 'Reading settings'))),
+          h('button', { class: 'btn', onclick: () => openMenu() }, 'Reading settings')),
+        offlineControl(title, [...parts.filter(p => !p.isDefault).map(p => p.ref), ...sections.map(s => s.ref)])),
       parts.filter(p => !p.isDefault).length ? h('section', { class: 'lib-section' }, h('h2', null, 'Parts'),
         h('div', { class: 'list parts' }, parts.map(p => p.isDefault
           ? (sections.length ? null : null)
@@ -469,6 +530,58 @@
       grid ? h('section', { class: 'lib-section' }, h('h2', null, isTalmud(shapes[0]) ? 'Dapim' : 'Chapters'), grid) : null,
       foot());
     window.scrollTo(0, 0);
+  }
+
+  // ================= Offline downloads =================
+  const textURL = ref => `${API}/texts/${enc(ref)}?context=0&commentary=0&pad=0`;
+  async function countSaved(refs) {
+    if (!('caches' in window)) return 0;
+    let n = 0;
+    try {
+      const c = await caches.open('sefer-texts-v1');
+      for (const r of refs) if (await c.match(textURL(r))) n++;
+    } catch {}
+    return n;
+  }
+  function offlineControl(title, refs) {
+    if (!refs.length || !('serviceWorker' in navigator) || !('caches' in window)) return null;
+    const label = refs.length === 1 ? 'section' : 'sections';
+    const status = h('span', { class: 'off-status' });
+    const btn = h('button', { class: 'btn' }, `Download for offline (${refs.length} ${label})`);
+    const wrap = h('div', { class: 'offline' }, btn, status);
+    countSaved(refs).then(n => {
+      if (n === refs.length) { btn.hidden = true; status.textContent = '✓ Saved for offline reading'; }
+      else if (n) status.textContent = `${n} of ${refs.length} already saved`;
+    });
+    btn.onclick = async () => {
+      btn.disabled = true;
+      try { if (navigator.storage && navigator.storage.persist) await navigator.storage.persist(); } catch {}
+      try { await Promise.race([navigator.serviceWorker.ready, sleep(3000)]); } catch {}
+      let done = 0, failed = 0, i = 0;
+      const tick = () => { status.textContent = `Downloading ${done} of ${refs.length}…`; };
+      tick();
+      const worker = async () => {
+        while (i < refs.length) {
+          const r = refs[i++];
+          try {
+            const c = await caches.open('sefer-texts-v1');
+            if (!(await c.match(textURL(r)))) {
+              const res = await fetch(textURL(r));
+              if (!res.ok) throw new Error();
+              // The service worker normally stores it; store it here too in case it isn't running yet.
+              if (!(await c.match(textURL(r)))) await c.put(textURL(r), res);
+            }
+          } catch { failed++; }
+          done++; tick();
+        }
+      };
+      await Promise.all([worker(), worker(), worker()]);
+      const saved = await countSaved(refs);
+      btn.disabled = false;
+      if (saved === refs.length) { btn.hidden = true; status.textContent = '✓ Saved for offline reading'; }
+      else { btn.textContent = 'Try again'; status.textContent = `${saved} of ${refs.length} saved${failed ? `. ${failed} couldn't be downloaded.` : '.'}`; }
+    };
+    return wrap;
   }
 
   // ================= Search (library and reader menu) =================
@@ -554,7 +667,7 @@
     return p;
   }
   function render() {
-    const { he, en } = S.data;
+    const en = S.data.en, he = S.data.he.map(prepHe);
     let mode = SET.lang, note = '';
     const hasEn = en.some(Boolean), hasHe = he.some(Boolean);
     if (mode === 'en' && !hasEn) { mode = 'he'; note = 'No English translation on Sefaria for this section.'; }
@@ -565,6 +678,9 @@
     flow.replaceChildren();
     flow.dir = S.rtl ? 'rtl' : 'ltr';
     flow.classList.toggle('nonums', !SET.nums);
+    const trop = mode !== 'en' && !TROP_FONTS.has(SET.heFont) && TROP_RE.test(he.join(''));
+    flow.classList.toggle('trop', trop);
+    S.fontWait = trop ? ensureFont('Noto Serif Hebrew') : null;
     const head = [h('h2', { class: 'sec', dir: S.rtl ? 'rtl' : 'ltr' }, S.rtl ? S.data.heRef : S.data.ref)];
     if (note) head.push(h('p', { class: 'note' }, note));
 
@@ -650,6 +766,7 @@
     flow.style.columnWidth = 'auto';
     flow.style.columnGap = 'normal';
     flow.classList.toggle('narrow', W < 560);
+    flow.classList.toggle('align-start', SET.align === 'start' || (SET.align === 'auto' && W < 960));
     let n = 0;
     const newPage = () => {
       const p = h('div', { class: 'bpage', style: `width:${W}px;left:${(S.rtl ? -1 : 1) * n * S.step}px` });
@@ -684,6 +801,7 @@
     const two = SET.cols === '2' ? W >= 360 : SET.cols === '1' ? false : W >= 640;
     const G = two ? Math.round(Math.min(80, Math.max(32, W * 0.07))) : 48;
     const colW = two ? (W - G) / 2 : W;
+    flow.classList.toggle('align-start', SET.align === 'start' || (SET.align === 'auto' && colW < 480));
     flow.style.width = W + 'px';
     flow.style.height = H + 'px';
     flow.style.columnWidth = colW + 'px';
@@ -731,12 +849,12 @@
       return showError(e, () => openRef(ref, at), ref);
     }
     if (token !== S.loadToken) return;
-    S.data = data; S.ref = data.sectionRef;
+    S.data = data; S.ref = /-/.test(data.ref) ? data.ref : data.sectionRef;
     document.title = `${data.ref} · Sefer Reader`;
     syncSection();
     hideMsg();
     render();
-    try { await document.fonts.ready; } catch {}
+    await waitFonts();
     if (token !== S.loadToken) return;
     layout();
     S.page = at === 'last' ? S.pages - 1 : Math.min(S.pages - 1, Math.floor((at || 0) * S.pages + 0.0001));
@@ -744,7 +862,22 @@
     S.loading = false;
     if (S.cur >= 0) $('m-sec').value = String(S.cur);
     loadShape(data.title);
-    if (data.next) getText(data.next).catch(() => {});
+    readAhead(data, token);
+  }
+  async function waitFonts() {
+    try {
+      if (S.fontWait) { await S.fontWait; await document.fonts.load('400 20px "Noto Serif Hebrew"', '\u05D0\u0591'); }
+      await document.fonts.ready;
+    } catch {}
+  }
+  // Fetch the next few sections in the background so they open instantly and are saved for offline.
+  async function readAhead(data, token) {
+    let d = data;
+    for (let k = 0; k < (SET.ahead || 1) && d && d.next; k++) {
+      if (token !== S.loadToken) return;
+      try { d = await getText(d.next); } catch { return; }
+      await sleep(120);
+    }
   }
   function relayout() {
     if (!S.data || reader.hidden) return;
@@ -753,11 +886,11 @@
     S.page = Math.min(S.pages - 1, Math.floor(frac * S.pages + 0.0001));
     show(false);
   }
-  function rerender() { if (S.data && !reader.hidden) { render(); relayout(); } }
+  function rerender() { if (S.data && !reader.hidden) { render(); relayout(); if (S.fontWait) relayoutAfterFonts(); } }
   let fontT;
   function relayoutAfterFonts() {
     clearTimeout(fontT);
-    fontT = setTimeout(async () => { try { await document.fonts.ready; } catch {} relayout(); }, 60);
+    fontT = setTimeout(async () => { await waitFonts(); relayout(); }, 60);
   }
 
   function next() {
@@ -830,6 +963,8 @@
     $('m-lh').value = SET.lh; $('m-lh-v').textContent = Number(SET.lh).toFixed(2);
     $('m-margin').value = SET.margin; $('m-margin-v').textContent = ['None', 'Narrow', 'Normal', 'Wide', 'Wider', 'Widest'][SET.margin];
     $('m-nums').checked = SET.nums;
+    pressGroup('m-vowels', SET.vowels); pressGroup('m-align', SET.align);
+    $('m-ahead').value = String(SET.ahead);
   }
   function openMenu() {
     const inReader = !reader.hidden && S.data;
@@ -872,6 +1007,9 @@
   bindGroup('m-lang', 'lang', () => { fillSectionSelect(); rerender(); });
   bindGroup('m-theme', 'theme');
   bindGroup('m-cols', 'cols', relayout);
+  bindGroup('m-vowels', 'vowels', rerender);
+  bindGroup('m-align', 'align', relayout);
+  $('m-ahead').onchange = e => { SET.ahead = Number(e.target.value); applySettings(); };
   $('m-hefont').onchange = e => { SET.heFont = e.target.value; applySettings(); relayoutAfterFonts(); };
   $('m-enfont').onchange = e => { SET.enFont = e.target.value; applySettings(); relayoutAfterFonts(); };
   let rangeRAF;
@@ -902,4 +1040,10 @@
 
   applySettings();
   route();
+  if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+  }
+  document.fonts && document.fonts.addEventListener && document.fonts.addEventListener('loadingdone', () => { if (!reader.hidden && S.data && !S.loading) relayoutAfterFonts(); });
+  window.addEventListener('online', () => { if (!libEl.hidden) route(); });
+  window.addEventListener('offline', () => { if (!libEl.hidden) route(); });
 })();

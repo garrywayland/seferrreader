@@ -7,6 +7,9 @@ A distraction-free, page-by-page reader for any sefer on [Sefaria](https://www.s
 - Swipe, arrow keys and the space bar also turn pages.
 - Hebrew, English, or both. Choice of Hebrew and English fonts, text size, line spacing, margins, one or two columns, and Auto/Light/Sepia/Dark themes.
 - A library home page: search, Continue reading (with progress), and browsing by category the way Sefaria's home page does, down to a page for each book with its description, author and date, and a grid of chapters or dapim.
+- Today's learning on the home page (Daf Yomi, parasha, Rambam, Mishnah Yomit and Sefaria's other daily schedules), with a Choose button to show only the ones you follow.
+- Works offline: sections you read and the ones after them are saved (5 to 50 ahead, in settings), and any book can be downloaded from its page.
+- Text with trop uses a font that places the cantillation marks correctly, and trop or all nikud can be hidden.
 - Your place and settings are saved on each device.
 - Every page has its own link: `…/#Berakhot_2a` (a text), `…/#/b/Berakhot` (a book), `…/#/c/Talmud` (a category).
 
