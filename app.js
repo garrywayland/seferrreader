@@ -25,7 +25,7 @@
     ['Inter', 'Inter (sans)'],
   ];
   const MARGINS = [0, 12, 32, 56, 88, 128];
-  const DEFAULTS = { lang: 'he', theme: 'auto', heFont: 'Frank Ruhl Libre', enFont: 'Crimson Pro', size: 21, lh: 1.78, margin: 2, cols: 'auto', nums: true, vowels: 'all', align: 'auto', ahead: 10, yomiHidden: [] };
+  const DEFAULTS = { lang: 'he', theme: 'auto', heFont: 'Frank Ruhl Libre', enFont: 'Crimson Pro', size: 21, lh: 1.78, margin: 2, cols: 'auto', nums: true, vowels: 'all', align: 'auto', ahead: 10, yomiHidden: [], comm: {}, commFont: 'rashi' };
   const SET = Object.assign({}, DEFAULTS, readJSON(KEY_SET, {}));
 
   function readJSON(k, fallback) { try { const v = JSON.parse(localStorage.getItem(k)); return v == null ? fallback : v; } catch { return fallback; } }
@@ -55,11 +55,15 @@
     return t;
   }
   function applySettings() {
+    // Remember the current pasuk before the change reflows the text.
+    if (S.data && !reader.hidden && !S.keep) S.keep = { a: getAnchor(), frac: S.pages > 1 ? S.page / S.pages : 0 };
     ensureFont(SET.heFont); ensureFont(SET.enFont);
     const st = document.documentElement.style;
     st.setProperty('--he', `"${SET.heFont}", "Frank Ruhl Libre", "Noto Serif Hebrew", "Times New Roman", serif`);
     st.setProperty('--en', `"${SET.enFont}", "Crimson Pro", Georgia, "Times New Roman", serif`);
     st.setProperty('--fs', SET.size + 'px');
+    if (SET.commFont === 'rashi') ensureFont('Noto Rashi Hebrew');
+    st.setProperty('--comm-he', SET.commFont === 'rashi' ? '"Noto Rashi Hebrew", var(--he)' : 'var(--he)');
     st.setProperty('--lh', String(SET.lh));
     st.setProperty('--mx', MARGINS[SET.margin] + 'px');
     st.setProperty('--my', (SET.margin * 6) + 'px');
@@ -181,7 +185,7 @@
       return {
         ref: d.ref || ref, heRef: d.heRef || d.ref || ref, sectionRef: d.sectionRef || d.ref || ref,
         title: d.indexTitle || d.book || '', heTitle: d.heIndexTitle || d.heTitle || '',
-        he: flat(d.he), en: flat(d.text), next: d.next || null, prev: d.prev || null,
+        he: flat(d.he), en: flat(d.text), heRaw: d.he, enRaw: d.text, next: d.next || null, prev: d.prev || null,
       };
     } catch (e) {
       if (e.code === 'not_found' || e.code === 'offline') throw e;
@@ -192,11 +196,83 @@
       return {
         ref: d.ref || ref, heRef: d.heRef || d.ref || ref, sectionRef: d.sectionRef || d.ref || ref,
         title: d.indexTitle || d.book || d.title || '', heTitle: d.heIndexTitle || d.heTitle || '',
-        he: he ? flat(he.text) : [], en: en ? flat(en.text) : [], next: d.next || null, prev: d.prev || null,
+        he: he ? flat(he.text) : [], en: en ? flat(en.text) : [], heRaw: he && he.text, enRaw: en && en.text, next: d.next || null, prev: d.prev || null,
       };
     }
   }
   const getText = ref => once('t:' + ref, () => fetchText(ref));
+  const getLinks = ref => once('l:' + ref, () => getJSON(`${API}/links/${enc(ref)}?with_text=0`));
+
+  // ================= Commentaries =================
+  const COMM_CATS = new Set(['Commentary', 'Targum']);
+  function commName(l) {
+    const ct = l.collectiveTitle || {};
+    return { en: ct.en || (l.index_title || '').replace(/ on .+$/, '') || l.category, he: ct.he || '' };
+  }
+  function anchorIndex(l) {
+    const ex = Array.isArray(l.anchorRefExpanded) && l.anchorRefExpanded.length ? l.anchorRefExpanded[l.anchorRefExpanded.length - 1] : l.anchorRef;
+    const m = String(ex || '').match(/:(\d+)$/);
+    return m ? Number(m[1]) - 1 : null;
+  }
+  // Commentaries available on a section, most comments first.
+  async function commAvailable(sectionRef) {
+    const links = await getLinks(sectionRef);
+    const counts = new Map();
+    (Array.isArray(links) ? links : []).forEach(l => {
+      if (!COMM_CATS.has(l.category) || anchorIndex(l) == null) return;
+      const n = commName(l);
+      const c = counts.get(n.en) || { en: n.en, he: n.he, n: 0 };
+      c.n++; counts.set(n.en, c);
+    });
+    return [...counts.values()].sort((a, b) => b.n - a.n);
+  }
+  function pickAt(arr, parts) {
+    let cur = arr;
+    for (const p of parts) {
+      if (!Array.isArray(cur)) return [];
+      const m = p.match(/^(\d+)(?:-(\d+))?$/);
+      if (!m) return [];
+      if (m[2]) return flat(cur.slice(Number(m[1]) - 1, Number(m[2])));
+      cur = cur[Number(m[1]) - 1];
+    }
+    return flat(cur);
+  }
+  // Load the chosen commentaries for a section: Map(segment index -> [{who, he, en}]).
+  function loadComm(data) {
+    const chosen = (SET.comm[data.title] || []).slice();
+    if (!chosen.length || /-/.test(data.ref)) return Promise.resolve(null);
+    return once('c:' + data.sectionRef + '|' + chosen.join('|'), async () => {
+      const links = (await getLinks(data.sectionRef)) || [];
+      const wanted = links.filter(l => COMM_CATS.has(l.category) && chosen.includes(commName(l).en) && anchorIndex(l) != null);
+      const units = new Map();
+      wanted.forEach(l => {
+        const m = String(l.ref || l.sourceRef || '').match(/^(.+) (\d+[ab]?(?::\d+(?:-\d+)?)*)$/);
+        if (!m) return;
+        const parts = m[2].split(':');
+        const unit = m[1] + ' ' + parts[0];
+        if (!units.has(unit)) units.set(unit, getText(unit).catch(() => null));
+        l._unit = unit; l._rest = parts.slice(1);
+      });
+      const texts = new Map();
+      await Promise.all([...units].map(async ([u, p]) => texts.set(u, await p)));
+      const map = new Map();
+      wanted.forEach(l => {
+        const t = texts.get(l._unit);
+        if (!t) return;
+        const he = pickAt(t.heRaw, l._rest).filter(Boolean).join(' ');
+        const en = pickAt(t.enRaw, l._rest).filter(Boolean).join(' ');
+        if (!he && !en) return;
+        const i = anchorIndex(l), who = commName(l);
+        if (!map.has(i)) map.set(i, []);
+        map.get(i).push({ who, he, en, order: chosen.indexOf(who.en), ref: l.ref || '' });
+      });
+      const num = r => (r.match(/\d+/g) || []).map(Number);
+      map.forEach(list => list.sort((a, b) => a.order - b.order || cmpNums(num(a.ref), num(b.ref))));
+      return { ref: data.sectionRef, map };
+    });
+  }
+  function cmpNums(a, b) { for (let k = 0; k < Math.max(a.length, b.length); k++) { const d = (a[k] || 0) - (b[k] || 0); if (d) return d; } return 0; }
+
   const getShape = title => once('s:' + title, async () => {
     const raw = await getJSON(`${API}/shape/${enc(title)}`);
     return (Array.isArray(raw) ? raw : [raw]).filter(x => x && x.title && 'chapters' in x);
@@ -661,10 +737,26 @@
   function syncSection() { S.cur = S.data ? S.sections.findIndex(s => s.ref === S.data.sectionRef) : -1; }
 
   function para(html, cls, i, rtl) {
-    const p = h('p', { class: 'seg ' + cls, dir: rtl ? 'rtl' : 'ltr', lang: cls === 'en' ? 'en' : 'he' });
+    const p = h('p', { class: 'seg ' + cls, dir: rtl ? 'rtl' : 'ltr', lang: cls === 'en' ? 'en' : 'he', 'data-i': i });
+    p.append(h('span', { class: 'a' }));
     if (i != null) p.append(h('span', { class: 'n' }, rtl ? gem(i + 1, false) : String(i + 1)));
     p.append(clean(html));
     return p;
+  }
+  function commFor(i) {
+    return S.comm && S.comm.ref === S.data.sectionRef ? (S.comm.map.get(i) || []) : [];
+  }
+  function commBlock(list, mode) {
+    const box = h('div', { class: 'comm-block' });
+    list.forEach((c, k) => {
+      const useEn = mode === 'en' ? !!c.en : !c.he;
+      const first = k === 0 || list[k - 1].who.en !== c.who.en;
+      const p = h('p', { class: 'comm ' + (useEn ? 'c-en' : 'c-he'), dir: useEn ? 'ltr' : 'rtl', lang: useEn ? 'en' : 'he' },
+        first ? h('cite', null, useEn ? c.who.en : (c.who.he || c.who.en)) : null);
+      p.append(first ? ' ' : '', clean(useEn ? c.en : prepHe(c.he)));
+      box.append(p);
+    });
+    return box;
   }
   function render() {
     const en = S.data.en, he = S.data.he.map(prepHe);
@@ -693,6 +785,15 @@
       for (let i = 0; i < len; i++) {
         if (!he[i] && !en[i]) continue;
         S.rows.push({ he: he[i] ? cleanHtml(he[i]) : '', en: en[i] ? cleanHtml(en[i]) : '', i });
+        commFor(i).forEach((c, k, list) => {
+          const first = k === 0 || list[k - 1].who.en !== c.who.en;
+          S.rows.push({
+            comm: true,
+            he: c.he ? (first ? `<cite>${esc(c.who.he || c.who.en)}</cite> ` : '') + cleanHtml(prepHe(c.he)) : '',
+            en: c.en ? (first ? `<cite>${esc(c.who.en)}</cite> ` : '') + cleanHtml(c.en) : '',
+            i: null,
+          });
+        });
       }
       return;
     }
@@ -700,11 +801,17 @@
 
     let last = null;
     const arr = mode === 'en' ? en : he;
-    arr.forEach((t, i) => { if (t) flow.append(last = para(t, mode === 'en' ? 'en' : 'he', i, S.rtl)); });
+    arr.forEach((t, i) => {
+      if (!t) return;
+      flow.append(last = para(t, mode === 'en' ? 'en' : 'he', i, S.rtl));
+      const list = commFor(i);
+      if (list.length) { const b = commBlock(list, mode); flow.append(b); last = b.lastChild; }
+    });
     if (!last) flow.append(last = h('p', { class: 'note' }, 'This section has no text on Sefaria.'));
     last.append(h('span', { id: 'end' }));
   }
 
+  const esc = t => String(t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   function cleanHtml(raw) { const d = document.createElement('div'); d.append(clean(raw)); return d.innerHTML; }
   const wordCount = html => html.replace(/<[^>]+>/g, ' ').split(/\s+/).filter(Boolean).length;
   // Split HTML after n words, closing and reopening any inline tags that span the cut.
@@ -726,7 +833,7 @@
     return [headStr.trim() + close, open + toks.slice(i).join('').trim()];
   }
   function rowEl(r) {
-    const row = h('div', { class: 'brow' });
+    const row = h('div', { class: r.comm ? 'brow comm-row' : 'brow', 'data-i': r.i });
     const he = h('p', { class: 'seg he', dir: 'rtl', lang: 'he' });
     if (r.i != null && r.he) he.append(h('span', { class: 'n' }, gem(r.i + 1, false)));
     he.insertAdjacentHTML('beforeend', r.he);
@@ -852,6 +959,10 @@
     S.data = data; S.ref = /-/.test(data.ref) ? data.ref : data.sectionRef;
     document.title = `${data.ref} · Sefer Reader`;
     syncSection();
+    S.commAvail = null;
+    const commP = loadComm(data).catch(() => null);
+    S.comm = await Promise.race([commP, sleep(4000).then(() => undefined)]);
+    if (token !== S.loadToken) return;
     hideMsg();
     render();
     await waitFonts();
@@ -860,6 +971,8 @@
     S.page = at === 'last' ? S.pages - 1 : Math.min(S.pages - 1, Math.floor((at || 0) * S.pages + 0.0001));
     show(false);
     S.loading = false;
+    if (S.comm === undefined) commP.then(c => { if (token === S.loadToken && c) { S.comm = c; rerender(); } });
+    commAvailable(data.sectionRef).then(a => { if (token === S.loadToken) { S.commAvail = a; if (!$('menu').hidden) renderCommMenu(); } }).catch(() => {});
     if (S.cur >= 0) $('m-sec').value = String(S.cur);
     loadShape(data.title);
     readAhead(data, token);
@@ -875,18 +988,64 @@
     let d = data;
     for (let k = 0; k < (SET.ahead || 1) && d && d.next; k++) {
       if (token !== S.loadToken) return;
-      try { d = await getText(d.next); } catch { return; }
+      try { d = await getText(d.next); await loadComm(d).catch(() => null); } catch { return; }
       await sleep(120);
     }
   }
+  // Keep the reader on the same pasuk/segment when the layout changes.
+  function getAnchor() {
+    if (!S.data) return null;
+    if (S.both) {
+      const pg = flow.querySelectorAll('.bpage')[S.page];
+      const el = pg && pg.querySelector('[data-i]');
+      return el ? Number(el.dataset.i) : null;
+    }
+    const cr = clip.getBoundingClientRect();
+    for (const a of flow.querySelectorAll('.seg > .a')) {
+      const r = a.getBoundingClientRect();
+      if (r.left >= cr.left - 2 && r.right <= cr.right + 2) return Number(a.parentNode.dataset.i);
+    }
+    return null;
+  }
+  function pageOf(i) {
+    if (i == null) return null;
+    if (S.both) {
+      const pages = [...flow.querySelectorAll('.bpage')];
+      const k = pages.findIndex(p => p.querySelector(`[data-i="${i}"]`));
+      return k >= 0 ? k : null;
+    }
+    const a = flow.querySelector(`.seg[data-i="${i}"] > .a`);
+    if (!a) return null;
+    const prev = flow.style.transform;
+    flow.classList.add('instant');
+    flow.style.transform = 'none';
+    const fr = flow.getBoundingClientRect(), r = a.getBoundingClientRect();
+    flow.style.transform = prev;
+    const off = S.rtl ? fr.right - r.right : r.left - fr.left;
+    return Math.max(0, Math.min(S.pages - 1, Math.floor((off + 1) / S.step)));
+  }
+  function place(anchor, frac) {
+    const p = pageOf(anchor);
+    S.page = p != null ? p : Math.min(S.pages - 1, Math.floor(frac * S.pages + 0.0001));
+  }
+  function takeAnchor() {
+    const k = S.keep || { a: getAnchor(), frac: S.pages > 1 ? S.page / S.pages : 0 };
+    clearTimeout(S.keepT); S.keepT = setTimeout(() => { S.keep = null; }, 400);
+    return k;
+  }
   function relayout() {
     if (!S.data || reader.hidden) return;
-    const frac = S.pages > 1 ? S.page / S.pages : 0;
+    const { a, frac } = takeAnchor();
     layout();
-    S.page = Math.min(S.pages - 1, Math.floor(frac * S.pages + 0.0001));
+    place(a, frac);
     show(false);
   }
-  function rerender() { if (S.data && !reader.hidden) { render(); relayout(); if (S.fontWait) relayoutAfterFonts(); } }
+  function rerender() {
+    if (!S.data || reader.hidden) return;
+    const { a, frac } = takeAnchor();
+    render(); layout(); place(a, frac); show(false);
+    if (S.fontWait || SET.commFont === 'rashi') relayoutAfterFonts();
+  }
   let fontT;
   function relayoutAfterFonts() {
     clearTimeout(fontT);
@@ -963,7 +1122,7 @@
     $('m-lh').value = SET.lh; $('m-lh-v').textContent = Number(SET.lh).toFixed(2);
     $('m-margin').value = SET.margin; $('m-margin-v').textContent = ['None', 'Narrow', 'Normal', 'Wide', 'Wider', 'Widest'][SET.margin];
     $('m-nums').checked = SET.nums;
-    pressGroup('m-vowels', SET.vowels); pressGroup('m-align', SET.align);
+    pressGroup('m-vowels', SET.vowels); pressGroup('m-align', SET.align); pressGroup('m-commfont', SET.commFont);
     $('m-ahead').value = String(SET.ahead);
   }
   function openMenu() {
@@ -972,6 +1131,7 @@
     $('m-he').textContent = inReader ? (S.data.heTitle || '') : 'הגדרות קריאה';
     $('m-en').textContent = inReader ? (S.data.title || '') : 'Reading settings';
     if (inReader) {
+      renderCommMenu();
       $('m-about').href = bookHash(S.data.title);
       $('m-about').hidden = !S.data.title;
       $('m-goto').hidden = !S.sections.length;
@@ -1009,6 +1169,47 @@
   bindGroup('m-cols', 'cols', relayout);
   bindGroup('m-vowels', 'vowels', rerender);
   bindGroup('m-align', 'align', relayout);
+  bindGroup('m-commfont', 'commFont', relayoutAfterFonts);
+  function renderCommMenu() {
+    const box = $('m-comm');
+    if (!S.data) return;
+    if (/-/.test(S.data.ref)) { box.replaceChildren(h('p', { class: 'help' }, 'Open a single chapter or daf to show commentaries.')); return; }
+    if (!S.commAvail) { box.replaceChildren(h('p', { class: 'help' }, 'Finding commentaries…')); return; }
+    if (!S.commAvail.length) { box.replaceChildren(h('p', { class: 'help' }, 'Sefaria has no commentaries linked to this section.')); return; }
+    const chosen = SET.comm[S.data.title] || [];
+    const list = [...S.commAvail].sort((a, b) => (chosen.includes(b.en) - chosen.includes(a.en)) || b.n - a.n);
+    const top = list.slice(0, 12), more = list.slice(12);
+    const chip = c => h('button', { class: 'chip-btn', 'aria-pressed': String(chosen.includes(c.en)), onclick: () => toggleComm(c.en) },
+      h('span', { class: 'ch-he', lang: 'he' }, c.he || c.en), h('span', { class: 'ch-en' }, c.he ? c.en : ''), h('span', { class: 'ch-n' }, String(c.n)));
+    const kids = [h('div', { class: 'chips-row' }, top.map(chip))];
+    if (more.length) {
+      const sel = h('select', { id: 'm-comm-more', 'aria-label': 'More commentaries' }, h('option', { value: '' }, `More (${more.length})…`),
+        more.map(c => h('option', { value: c.en }, `${c.en}${c.he ? ' · ' + c.he : ''} (${c.n})`)));
+      sel.onchange = () => { if (sel.value) toggleComm(sel.value); };
+      kids.push(sel);
+    }
+    if (chosen.length) kids.push(h('button', { class: 'linkish', onclick: () => { SET.comm[S.data.title] = []; applySettings(); refreshComm(); } }, 'Hide all'));
+    box.replaceChildren(...kids);
+  }
+  function toggleComm(name) {
+    const t = S.data.title;
+    const cur = SET.comm[t] || [];
+    SET.comm[t] = cur.includes(name) ? cur.filter(x => x !== name) : [...cur, name];
+    if (!SET.comm[t].length) delete SET.comm[t];
+    applySettings();
+    refreshComm();
+  }
+  async function refreshComm() {
+    renderCommMenu();
+    const data = S.data, token = S.loadToken;
+    $('m-comm-status').textContent = (SET.comm[data.title] || []).length ? 'Loading…' : '';
+    let c = null;
+    try { c = await loadComm(data); } catch {}
+    if (token !== S.loadToken || S.data !== data) return;
+    $('m-comm-status').textContent = '';
+    S.comm = c;
+    rerender();
+  }
   $('m-ahead').onchange = e => { SET.ahead = Number(e.target.value); applySettings(); };
   $('m-hefont').onchange = e => { SET.heFont = e.target.value; applySettings(); relayoutAfterFonts(); };
   $('m-enfont').onchange = e => { SET.enFont = e.target.value; applySettings(); relayoutAfterFonts(); };

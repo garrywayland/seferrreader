@@ -1,5 +1,5 @@
 // Offline support: the app shell, fonts, library metadata and every text you open are kept in the browser.
-const SHELL = 'shell-v1';
+const SHELL = 'shell-v2';
 const TEXTS = 'sefer-texts-v1';
 const META = 'sefer-meta-v1';
 const FONTS = 'sefer-fonts-v1';
@@ -51,7 +51,7 @@ self.addEventListener('fetch', e => {
   } else if (url.hostname === 'www.sefaria.org') {
     const p = url.pathname;
     if (/^\/api\/(v3\/)?texts\//.test(p)) e.respondWith(cacheFirst(req, TEXTS));
-    else if (/^\/api\/(index|shape\/|v2\/raw\/index\/)/.test(p)) e.respondWith(staleWhileRevalidate(req, META));
+    else if (/^\/api\/(index|shape\/|v2\/raw\/index\/|links\/)/.test(p)) e.respondWith(staleWhileRevalidate(req, META));
     else if (/^\/api\/calendars/.test(p)) e.respondWith(networkFirst(req, META));
   } else if (url.hostname === 'fonts.googleapis.com' || url.hostname === 'fonts.gstatic.com') {
     e.respondWith(cacheFirst(req, FONTS));

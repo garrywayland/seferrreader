@@ -260,3 +260,26 @@ body.in-reader #menu .lib-only { display: none; }
 .offline-note { margin: 0 0 18px; padding: 10px 14px; border: 1px solid var(--rule); border-radius: 10px; font-size: 14px; background: var(--panel); }
 .offline { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; margin-top: 12px; }
 .off-status { font-size: 13px; color: var(--muted); }
+
+/* Commentaries under each segment: smaller, set in, Rashi script by default */
+.seg > .a { display: inline-block; width: 0; }
+.comm-block { margin: -.2em 0 1em; padding-inline-start: .85em; border-inline-start: 2px solid var(--rule); font-size: .72em; }
+.comm { margin: 0 0 .45em; line-height: 1.6; text-align: justify; orphans: 2; widows: 2; }
+.align-start .comm { text-align: start; }
+.comm.c-he { font-family: var(--comm-he, var(--he)); }
+/* Dibbur hamatchil in square letters, as printed */
+.comm.c-he b, .comm.c-he strong, .comm-row .he b, .comm-row .he strong { font-family: var(--he); }
+.comm.c-en { font-family: var(--en); line-height: 1.45; }
+.comm cite, .comm-row cite { font-style: normal; font-family: var(--ui); font-weight: 600; font-size: .78em; color: var(--accent); letter-spacing: .02em; }
+.comm-row { font-size: .72em; background: none; padding-inline-start: .6em; border-inline-start: 2px solid var(--rule); }
+.comm-row .he { font-family: var(--comm-he, var(--he)); line-height: 1.6; }
+.comm-row .en { font-size: 1em; line-height: 1.45; }
+.chips-row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+.chip-btn { display: inline-flex; align-items: baseline; gap: 6px; border: 1px solid var(--rule); background: var(--bg); border-radius: 999px; padding: .4em .85em; cursor: pointer; font-size: 14px; }
+.chip-btn .ch-he { font-family: var(--he); font-size: 16px; }
+.chip-btn .ch-en { font-size: 12px; color: var(--muted); }
+.chip-btn .ch-n { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.chip-btn[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--bg); }
+.chip-btn[aria-pressed="true"] .ch-en, .chip-btn[aria-pressed="true"] .ch-n { color: inherit; opacity: .8; }
+#m-comm select { margin-bottom: 8px; }
+.comm-font { margin-top: 6px; justify-content: space-between; }
