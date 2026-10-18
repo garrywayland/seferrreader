@@ -1190,7 +1190,7 @@
   function openPrint() {
     closeMenu();
     $('pdlg').hidden = false; $('scrim').hidden = false;
-    $('p-status').textContent = '';
+    resetPrintReady();
     syncPrint();
   }
   function closePrint() { $('pdlg').hidden = true; if ($('menu').hidden) $('scrim').hidden = true; }
@@ -1262,11 +1262,14 @@
     await Promise.all(fams.map(f => ensureFont(f).then(() => Promise.all([
       document.fonts.load(`400 12pt "${f}"`, 'אבג abc'), document.fonts.load(`700 12pt "${f}"`, 'אבג abc')])).catch(() => {})));
   }
-  $('p-go').onclick = async () => {
-    if (!S.data) return;
-    const P = SET.print, btn = $('p-go'), status = $('p-status');
-    btn.disabled = true;
+  // Chrome ignores window.print() once the tap that started it is a few seconds old, and fetching
+  // texts, commentaries and fonts can take longer than that. So: get everything ready, then print
+  // straight away if the tap is still fresh, otherwise ask for one more tap.
+  let printReady = false;
+  async function preparePrint() {
+    const P = SET.print;
     const list = [S.data];
+    const status = $('p-status');
     try {
       let d = S.data;
       for (let k = 0; k < P.count && d.next; k++) {
@@ -1283,11 +1286,31 @@
     status.textContent = 'Preparing pages…';
     const trop = buildPrint(list, comms);
     await loadPrintFonts(trop);
-    btn.disabled = false;
-    status.textContent = '';
+  }
+  function doPrint() {
     closePrint();
-    window.print();
+    printReady = false;
+    $('p-go').textContent = 'Print';
+    try { window.print(); }
+    catch { toast('Printing was blocked. Use your browser menu → Print.'); }
+  }
+  $('p-go').onclick = async () => {
+    if (!S.data) return;
+    const btn = $('p-go'), status = $('p-status');
+    if (printReady) return doPrint();
+    btn.disabled = true;
+    try {
+      await preparePrint();
+      const fresh = !navigator.userActivation || navigator.userActivation.isActive;
+      if (fresh) { status.textContent = ''; doPrint(); }
+      else { printReady = true; btn.textContent = 'Open print window'; status.textContent = 'Ready. Tap once more.'; }
+    } catch (e) {
+      status.textContent = "Couldn't prepare the pages. Try again, or use your browser's Print (Ctrl+P / ⌘P).";
+    } finally { btn.disabled = false; }
   };
+  ['p-count', 'p-paper', 'p-cols', 'p-size', 'p-margin', 'p-comm'].forEach(id => $(id).addEventListener('change', resetPrintReady));
+  document.querySelectorAll('#pdlg .seg-btn').forEach(b => b.addEventListener('click', resetPrintReady));
+  function resetPrintReady() { printReady = false; $('p-go').textContent = 'Print'; $('p-status').textContent = ''; }
   // Printing from the browser's own menu prints the current section with the saved print options.
   window.addEventListener('beforeprint', () => {
     if (!$('print').childElementCount && S.data && !reader.hidden) buildPrint([S.data], [SET.print.comm ? S.comm : null]);
