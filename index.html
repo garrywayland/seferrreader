@@ -56,6 +56,7 @@
   <div class="reader-only row" id="m-links">
     <a class="btn" href="#/" id="m-home">Library</a>
     <a class="btn" href="#/" id="m-about">About this book</a>
+    <button class="btn" id="m-print">Print…</button>
   </div>
 
   <div class="reader-only">
@@ -171,6 +172,66 @@
 
   <p class="help">In the reader, tap the left side for the next page and the right side to go back (reversed in English). Tap the middle for this menu. Swipe, arrow keys and the space bar also turn pages. Settings and your place are saved on this device. Sections you read, the ones after them, and books you download stay available offline.</p>
 </div>
+
+<!-- Print options -->
+<div id="pdlg" role="dialog" aria-label="Print" hidden>
+  <div class="head">
+    <div class="head-title">
+      <div class="book">הדפסה</div>
+      <div class="en-title">Print or save as PDF</div>
+    </div>
+    <button class="btn" id="p-close">Close</button>
+  </div>
+  <div class="opts">
+    <div class="opt">
+      <label class="lbl" for="p-count">What to print</label>
+      <select id="p-count">
+        <option value="0">This section only</option>
+        <option value="1">This and the next one</option>
+        <option value="2">This and the next 2</option>
+        <option value="4">This and the next 4</option>
+        <option value="9">This and the next 9</option>
+        <option value="19">This and the next 19</option>
+      </select>
+    </div>
+    <div class="opt">
+      <span class="lbl">Paper</span>
+      <div class="seg-group" id="p-paper">
+        <button class="seg-btn" data-v="A4">A4</button>
+        <button class="seg-btn" data-v="letter">Letter</button>
+      </div>
+    </div>
+    <div class="opt">
+      <span class="lbl">Columns</span>
+      <div class="seg-group" id="p-cols">
+        <button class="seg-btn" data-v="1">One</button>
+        <button class="seg-btn" data-v="2">Two</button>
+      </div>
+    </div>
+    <div class="opt">
+      <span class="lbl">Text size</span>
+      <div class="seg-group" id="p-size">
+        <button class="seg-btn" data-v="S">Small</button>
+        <button class="seg-btn" data-v="M">Medium</button>
+        <button class="seg-btn" data-v="L">Large</button>
+      </div>
+    </div>
+    <div class="opt">
+      <span class="lbl">Margins</span>
+      <div class="seg-group" id="p-margin">
+        <button class="seg-btn" data-v="narrow">Narrow</button>
+        <button class="seg-btn" data-v="normal">Normal</button>
+        <button class="seg-btn" data-v="wide">Wide</button>
+      </div>
+    </div>
+  </div>
+  <label class="toggle" id="p-comm-wrap"><input type="checkbox" id="p-comm"> Include commentaries <span class="help" id="p-comm-names"></span></label>
+  <p class="help">Uses the text you're reading in (עברית, Both or English), your fonts and your vowel settings. In Both, Hebrew and English sit side by side. To make a PDF, choose “Save as PDF” in the print window.</p>
+  <div class="row"><button class="btn primary" id="p-go">Print</button><span class="off-status" id="p-status"></span></div>
+</div>
+
+<div id="print" aria-hidden="true"></div>
+<style id="pstyle"></style>
 
 <script src="app.js"></script>
 </body>

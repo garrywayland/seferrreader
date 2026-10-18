@@ -25,7 +25,7 @@
     ['Inter', 'Inter (sans)'],
   ];
   const MARGINS = [0, 12, 32, 56, 88, 128];
-  const DEFAULTS = { lang: 'he', theme: 'auto', heFont: 'Frank Ruhl Libre', enFont: 'Crimson Pro', size: 21, lh: 1.78, margin: 2, cols: 'auto', nums: true, vowels: 'all', align: 'auto', ahead: 10, yomiHidden: [], comm: {}, commFont: 'rashi' };
+  const DEFAULTS = { lang: 'he', theme: 'auto', heFont: 'Frank Ruhl Libre', enFont: 'Crimson Pro', size: 21, lh: 1.78, margin: 2, cols: 'auto', nums: true, vowels: 'all', align: 'auto', ahead: 10, yomiHidden: [], comm: {}, commFont: 'rashi', print: { count: 0, paper: 'A4', cols: '2', size: 'M', margin: 'normal', comm: true } };
   const SET = Object.assign({}, DEFAULTS, readJSON(KEY_SET, {}));
 
   function readJSON(k, fallback) { try { const v = JSON.parse(localStorage.getItem(k)); return v == null ? fallback : v; } catch { return fallback; } }
@@ -743,9 +743,8 @@
     p.append(clean(html));
     return p;
   }
-  function commFor(i) {
-    return S.comm && S.comm.ref === S.data.sectionRef ? (S.comm.map.get(i) || []) : [];
-  }
+  function commFor(i) { return commOf(S.comm, S.data, i); }
+  function commOf(c, data, i) { return c && c.ref === data.sectionRef ? (c.map.get(i) || []) : []; }
   function commBlock(list, mode) {
     const box = h('div', { class: 'comm-block' });
     list.forEach((c, k) => {
@@ -1087,6 +1086,7 @@
   reader.addEventListener('pointercancel', () => { down = null; });
 
   document.addEventListener('keydown', e => {
+    if (!$('pdlg').hidden) { if (e.key === 'Escape') closePrint(); return; }
     if (!$('menu').hidden) { if (e.key === 'Escape') closeMenu(); return; }
     if (reader.hidden) return;
     if (e.target.closest && e.target.closest('input, select, textarea')) return;
@@ -1141,7 +1141,7 @@
   }
   function closeMenu() { $('menu').hidden = true; $('scrim').hidden = true; }
   $('m-close').onclick = closeMenu;
-  $('scrim').onclick = closeMenu;
+  $('scrim').onclick = () => { closeMenu(); closePrint(); };
   $('m-home').onclick = closeMenu;
   $('m-about').onclick = closeMenu;
 
@@ -1170,6 +1170,129 @@
   bindGroup('m-vowels', 'vowels', rerender);
   bindGroup('m-align', 'align', relayout);
   bindGroup('m-commfont', 'commFont', relayoutAfterFonts);
+
+  // ================= Print =================
+  // The text is reflowed for paper (not copied from the screen pages): two columns on A4,
+  // or Hebrew/English side by side, with chosen commentaries under each segment.
+  const P_SIZE = { S: '10.5pt', M: '12pt', L: '14pt' };
+  const P_MARGIN = { narrow: '10mm 10mm 12mm', normal: '15mm 14mm 17mm', wide: '22mm 20mm 24mm' };
+  SET.print = Object.assign({}, DEFAULTS.print, SET.print);
+  function syncPrint() {
+    const P = SET.print;
+    $('p-count').value = String(P.count);
+    pressGroup('p-paper', P.paper); pressGroup('p-cols', P.cols); pressGroup('p-size', P.size); pressGroup('p-margin', P.margin);
+    const chosen = S.data ? (SET.comm[S.data.title] || []) : [];
+    $('p-comm-wrap').hidden = !chosen.length;
+    $('p-comm').checked = P.comm;
+    $('p-comm-names').textContent = chosen.length ? `(${chosen.join(', ')})` : '';
+    $('p-cols').closest('.opt').hidden = SET.lang === 'both';
+  }
+  function openPrint() {
+    closeMenu();
+    $('pdlg').hidden = false; $('scrim').hidden = false;
+    $('p-status').textContent = '';
+    syncPrint();
+  }
+  function closePrint() { $('pdlg').hidden = true; if ($('menu').hidden) $('scrim').hidden = true; }
+  $('m-print').onclick = openPrint;
+  $('p-close').onclick = closePrint;
+  ['p-paper', 'p-cols', 'p-size', 'p-margin'].forEach(id => document.querySelectorAll(`#${id} .seg-btn`).forEach(b => b.onclick = () => {
+    SET.print[id.slice(2)] = b.dataset.v; pressGroup(id, b.dataset.v); writeJSON(KEY_SET, SET);
+  }));
+  $('p-count').onchange = e => { SET.print.count = Number(e.target.value); writeJSON(KEY_SET, SET); };
+  $('p-comm').onchange = e => { SET.print.comm = e.target.checked; writeJSON(KEY_SET, SET); };
+
+  function printSection(data, comm) {
+    const en = data.en, he = data.he.map(prepHe);
+    let mode = SET.lang;
+    const hasEn = en.some(Boolean), hasHe = he.some(Boolean);
+    if ((mode === 'en' || mode === 'both') && !hasEn) mode = 'he';
+    if (mode !== 'en' && !hasHe) mode = 'en';
+    const rtl = mode !== 'en';
+    const trop = mode !== 'en' && !TROP_FONTS.has(SET.heFont) && TROP_RE.test(he.join(''));
+    const sec = h('section', { class: 'p-sec' + (trop ? ' trop' : ''), dir: rtl ? 'rtl' : 'ltr' },
+      h('h2', { class: 'sec', dir: rtl ? 'rtl' : 'ltr' }, rtl ? data.heRef : data.ref));
+    if (mode === 'both') {
+      const len = Math.max(he.length, en.length);
+      for (let i = 0; i < len; i++) {
+        if (!he[i] && !en[i]) continue;
+        sec.append(rowEl({ he: he[i] ? cleanHtml(he[i]) : '', en: en[i] ? cleanHtml(en[i]) : '', i }));
+        commOf(comm, data, i).forEach((c, k, list) => {
+          const first = k === 0 || list[k - 1].who.en !== c.who.en;
+          sec.append(rowEl({ comm: true, i: null,
+            he: c.he ? (first ? `<cite>${esc(c.who.he || c.who.en)}</cite> ` : '') + cleanHtml(prepHe(c.he)) : '',
+            en: c.en ? (first ? `<cite>${esc(c.who.en)}</cite> ` : '') + cleanHtml(c.en) : '' }));
+        });
+      }
+    } else {
+      (mode === 'en' ? en : he).forEach((t, i) => {
+        if (!t) return;
+        sec.append(para(t, mode === 'en' ? 'en' : 'he', i, rtl));
+        const list = commOf(comm, data, i);
+        if (list.length) sec.append(commBlock(list, mode));
+      });
+    }
+    return { sec, trop, rtl };
+  }
+  function buildPrint(list, comms) {
+    const P = SET.print;
+    const both = SET.lang === 'both';
+    const parts = list.map((d, k) => printSection(d, comms[k]));
+    const rtl = parts.length ? parts[0].rtl : true;
+    const first = list[0], last = list[list.length - 1];
+    const range = list.length > 1 ? `${rtl ? first.heRef : first.ref} – ${rtl ? last.heRef : last.ref}` : (rtl ? first.heRef : first.ref);
+    const flowEl = h('div', { class: 'p-flow' + (both ? ' p-both' : (P.cols === '2' ? ' cols2' : '')), dir: rtl ? 'rtl' : 'ltr' }, parts.map(p => p.sec));
+    flowEl.classList.toggle('nonums', !SET.nums);
+    $('print').replaceChildren(
+      h('h1', { class: 'p-title', dir: rtl ? 'rtl' : 'ltr' }, rtl ? (first.heTitle || first.title) : first.title,
+        rtl && first.title ? h('span', { class: 'en' }, first.title) : null),
+      flowEl);
+    const q = t => '"' + String(t).replace(/["\\]/g, '') + '"';
+    $('pstyle').textContent = `@page { size: ${P.paper === 'letter' ? 'letter' : 'A4'} portrait; margin: ${P_MARGIN[P.margin] || P_MARGIN.normal};
+      @top-center { content: ${q(range)}; font: 9pt "Frank Ruhl Libre", serif; color: #666; }
+      @bottom-center { content: counter(page); font: 9pt system-ui, sans-serif; color: #666; } }
+      @page :first { @top-center { content: none; } }
+      #print { --pfs: ${P_SIZE[P.size] || P_SIZE.M}; }`;
+    return parts.some(p => p.trop);
+  }
+  async function loadPrintFonts(trop) {
+    const fams = [SET.heFont, SET.enFont];
+    if (trop) fams.push('Noto Serif Hebrew');
+    if (SET.commFont === 'rashi') fams.push('Noto Rashi Hebrew');
+    await Promise.all(fams.map(f => ensureFont(f).then(() => Promise.all([
+      document.fonts.load(`400 12pt "${f}"`, 'אבג abc'), document.fonts.load(`700 12pt "${f}"`, 'אבג abc')])).catch(() => {})));
+  }
+  $('p-go').onclick = async () => {
+    if (!S.data) return;
+    const P = SET.print, btn = $('p-go'), status = $('p-status');
+    btn.disabled = true;
+    const list = [S.data];
+    try {
+      let d = S.data;
+      for (let k = 0; k < P.count && d.next; k++) {
+        status.textContent = `Getting ${k + 2} of ${P.count + 1}…`;
+        d = await getText(d.next); list.push(d);
+      }
+    } catch { status.textContent = `Couldn't get everything; printing ${list.length}.`; }
+    const withComm = P.comm && (SET.comm[S.data.title] || []).length;
+    const comms = [];
+    for (let k = 0; k < list.length; k++) {
+      if (withComm) status.textContent = `Getting commentaries ${k + 1} of ${list.length}…`;
+      comms.push(withComm ? (list[k] === S.data && S.comm ? S.comm : await loadComm(list[k]).catch(() => null)) : null);
+    }
+    status.textContent = 'Preparing pages…';
+    const trop = buildPrint(list, comms);
+    await loadPrintFonts(trop);
+    btn.disabled = false;
+    status.textContent = '';
+    closePrint();
+    window.print();
+  };
+  // Printing from the browser's own menu prints the current section with the saved print options.
+  window.addEventListener('beforeprint', () => {
+    if (!$('print').childElementCount && S.data && !reader.hidden) buildPrint([S.data], [SET.print.comm ? S.comm : null]);
+  });
+  window.addEventListener('afterprint', () => { $('print').replaceChildren(); });
   function renderCommMenu() {
     const box = $('m-comm');
     if (!S.data) return;
