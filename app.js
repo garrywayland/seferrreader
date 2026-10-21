@@ -25,7 +25,7 @@
     ['Inter', 'Inter (sans)'],
   ];
   const MARGINS = [0, 12, 32, 56, 88, 128];
-  const DEFAULTS = { lang: 'he', theme: 'auto', heFont: 'Frank Ruhl Libre', enFont: 'Crimson Pro', size: 21, lh: 1.78, margin: 2, cols: 'auto', nums: true, vowels: 'all', align: 'auto', ahead: 10, yomiHidden: [], comm: {}, commFont: 'rashi', print: { count: 0, paper: 'A4', cols: '2', size: 'M', margin: 'normal', comm: true } };
+  const DEFAULTS = { lang: 'he', theme: 'auto', heFont: 'Frank Ruhl Libre', enFont: 'Crimson Pro', size: 21, lh: 1.78, margin: 2, cols: 'auto', nums: true, vowels: 'all', align: 'auto', ahead: 10, yomiHidden: [], comm: {}, commFont: 'rashi', tapSide: 'standard', tapZone: 35, ui: 'normal', wake: true, remTime: '07:30', print: { count: 0, paper: 'A4', cols: '2', size: 'M', margin: 'normal', comm: true } };
   const SET = Object.assign({}, DEFAULTS, readJSON(KEY_SET, {}));
 
   function readJSON(k, fallback) { try { const v = JSON.parse(localStorage.getItem(k)); return v == null ? fallback : v; } catch { return fallback; } }
@@ -70,6 +70,12 @@
     if (SET.theme === 'auto') document.documentElement.removeAttribute('data-theme');
     else document.documentElement.setAttribute('data-theme', SET.theme);
     flow.classList.toggle('nonums', !SET.nums);
+    st.setProperty('--ui-zoom', String({ normal: 1, large: 1.15, larger: 1.3 }[SET.ui] || 1));
+    // Colour the browser/phone bars to match the page.
+    try {
+      const bg = getComputedStyle(document.documentElement).getPropertyValue('--bg').trim();
+      document.querySelectorAll('meta[name="theme-color"]').forEach(m => { m.removeAttribute('media'); if (bg) m.setAttribute('content', bg); });
+    } catch {}
     writeJSON(KEY_SET, SET);
   }
 
@@ -201,6 +207,50 @@
     }
   }
   const getText = ref => once('t:' + ref, () => fetchText(ref));
+  // Full-text search (Sefaria's search service). The body is sent as text/plain so the browser
+  // needs no CORS preflight.
+  const SEARCH_URLS = [`${API}/search-wrapper/es8`, `${API}/search-wrapper`];
+  const searchHash = (q, book, exact) => '#/s?' + new URLSearchParams({ q, ...(book ? { b: book } : {}), ...(exact ? { x: '1' } : {}) }).toString();
+  function parseSearch(j) {
+    const H = j && j.hits;
+    if (!H || !Array.isArray(H.hits)) throw new ApiError('bad_shape');
+    const total = H.total && typeof H.total === 'object' ? H.total.value : H.total;
+    const seen = new Map();
+    H.hits.forEach(hit => {
+      const src = hit._source || {};
+      const ref = src.ref || String(hit._id || '').replace(/ \(.*\)$/, '');
+      if (!ref) return;
+      const hl = hit.highlight ? Object.values(hit.highlight).flat() : [];
+      const snippet = hl.slice(0, 2).join(' … ');
+      const prev = seen.get(ref);
+      if (prev && (prev.snippet || !snippet)) return;
+      seen.set(ref, { ref, heRef: src.heRef || '', cats: src.categories || [], snippet });
+    });
+    return { total: typeof total === 'number' ? total : null, items: [...seen.values()], raw: H.hits.length };
+  }
+  async function runSearch({ q, book, exact, start }) {
+    const entry = book ? BOOKS.get(book) : null;
+    const filters = entry ? [[...entry.path, book].join('/')] : [];
+    const size = book && !entry ? 200 : 50;
+    const body = JSON.stringify({
+      query: q, type: 'text', field: exact ? 'exact' : 'naive_lemmatizer', slop: exact ? 0 : 10, size, start,
+      filters, filter_fields: filters.map(() => 'path'), source_proj: true, aggs: [],
+      sort_method: 'score', sort_fields: ['pagesheetrank'], sort_reverse: false, sort_score_missing: 0.04,
+    });
+    let last = new ApiError('network');
+    for (const url of SEARCH_URLS) {
+      let res;
+      try { res = await fetch(url, { method: 'POST', body }); }
+      catch { last = new ApiError(navigator.onLine === false ? 'offline' : 'network'); continue; }
+      if (!res.ok) { last = new ApiError('http', 'HTTP ' + res.status); continue; }
+      try {
+        const r = parseSearch(await res.json());
+        if (book) r.items = r.items.filter(i => i.ref === book || i.ref.startsWith(book + ' ') || i.ref.startsWith(book + ','));
+        return r;
+      } catch (e) { last = e; }
+    }
+    throw last;
+  }
   const getLinks = ref => once('l:' + ref, () => getJSON(`${API}/links/${enc(ref)}?with_text=0`));
 
   // ================= Commentaries =================
@@ -391,10 +441,10 @@
       h('a', { class: 'brand', href: '#/' }, h('span', { class: 'mark', lang: 'he' }, 'ספר'), h('span', { class: 'name' }, 'Sefer Reader')),
       h('button', { class: 'icon-btn', onclick: () => openMenu() }, gearIcon(), 'Reading settings'));
   }
-  function searchBox(autofocus) {
+  function searchBox(autofocus, scope) {
     const box = h('div', { class: 'sugg', role: 'listbox' });
-    const input = h('input', { type: 'search', id: 'q', placeholder: 'Search for a sefer or reference: Berakhot, Mishnah Berurah, Genesis 12…', autocomplete: 'off', enterkeyhint: 'go', 'aria-label': 'Search' });
-    attachSearch(input, box);
+    const input = h('input', { type: 'search', id: 'q', placeholder: 'Search for a sefer, a reference, or words in the text…', autocomplete: 'off', enterkeyhint: 'go', 'aria-label': 'Search' });
+    attachSearch(input, box, null, scope ? () => scope : null);
     if (autofocus) setTimeout(() => input.focus(), 30);
     return h('div', { class: 'search' }, searchIcon(), input, box);
   }
@@ -589,7 +639,7 @@
         h('span', { class: 'h', lang: 'he' }, s.short), h('span', { class: 'e' }, s.en)))) : null;
 
     setLib(
-      masthead(), searchBox(false), crumbs(path),
+      masthead(), searchBox(false, title), crumbs(path),
       h('div', { class: 'page-head', style: `--c:${catColor(path[0])}` },
         h('div', { class: 'names' }, h('h1', null, title), h('span', { class: 'he-name', lang: 'he', dir: 'rtl' }, heTitle)),
         meta ? h('p', { class: 'meta' }, meta) : null,
@@ -661,47 +711,111 @@
   }
 
   // ================= Search (library and reader menu) =================
-  function attachSearch(input, box, onPick) {
+  function attachSearch(input, box, onPick, scopeFn) {
     let t, tok = 0;
-    const pick = it => {
-      box.replaceChildren(); input.value = '';
-      if (onPick) onPick();
-      location.hash = it.book ? bookHash(it.key) : refHash(it.key);
-    };
-    const render = (items, hint) => {
-      box.replaceChildren(...(hint ? [h('div', { class: 'hint' }, hint)] : []), ...items.map(it =>
-        h('button', { type: 'button', onclick: () => pick(it) }, h('span', null, it.label), h('span', { class: 'kind' }, it.book ? 'Book' : 'Open'))));
+    const go = hash => { box.replaceChildren(); input.value = ''; if (onPick) onPick(); location.hash = hash; };
+    const pick = it => go(it.search ? searchHash(it.key, it.search.b, false) : it.book ? bookHash(it.key) : refHash(it.key));
+    // Name matches (books, references) first, then ways to search the text itself.
+    async function suggest(q) {
+      let items = [];
+      try {
+        const [r] = await Promise.all([getJSON(`${API}/name/${encodeURIComponent(q)}?limit=12`), getTOC().catch(() => null)]);
+        if (r.is_ref && r.ref && /\d/.test(r.ref)) items.push({ key: r.ref, label: r.ref, book: false });
+        (r.completion_objects || []).filter(o => o.type === 'ref').forEach(o => {
+          if (!items.some(i => i.key === o.key)) items.push({ key: o.key, label: o.title, book: BOOKS.has(o.key) });
+        });
+        items = items.slice(0, 8);
+      } catch {}
+      const scope = scopeFn && scopeFn();
+      const actions = [];
+      if (scope) actions.push({ key: q, label: `Search in ${scope} for “${q}”`, search: { b: scope } });
+      actions.push({ key: q, label: `Search all texts for “${q}”`, search: { b: '' } });
+      return { items, actions };
+    }
+    const render = (q, { items, actions }) => {
+      box.dataset.q = q;
+      box.replaceChildren(
+        ...items.map(it => h('button', { type: 'button', onclick: () => pick(it) }, h('span', null, it.label), h('span', { class: 'kind' }, it.book ? 'Book' : 'Open'))),
+        items.length ? h('div', { class: 'sugg-sep' }) : null,
+        ...actions.map(it => h('button', { type: 'button', onclick: () => pick(it) }, h('span', null, it.label), h('span', { class: 'kind' }, 'Text'))));
     };
     input.addEventListener('input', () => {
       clearTimeout(t);
       const q = input.value.trim();
+      box.dataset.q = '';
       if (q.length < 2) { box.replaceChildren(); return; }
       t = setTimeout(async () => {
         const my = ++tok;
-        try {
-          const [r] = await Promise.all([getJSON(`${API}/name/${encodeURIComponent(q)}?limit=12`), getTOC().catch(() => null)]);
-          if (my !== tok) return;
-          const items = [];
-          if (r.is_ref && r.ref && /\d/.test(r.ref)) items.push({ key: r.ref, label: r.ref, book: false });
-          (r.completion_objects || []).filter(o => o.type === 'ref').forEach(o => {
-            if (items.some(i => i.key === o.key)) return;
-            items.push({ key: o.key, label: o.title, book: BOOKS.has(o.key) });
-          });
-          render(items.slice(0, 10), items.length ? '' : 'No matching sefer. Press Enter to open it as typed.');
-        } catch {
-          if (my === tok) render([], 'Search is unavailable right now. Press Enter to open as typed.');
-        }
+        const r = await suggest(q);
+        if (my === tok && input.value.trim() === q) render(q, r);
       }, 220);
     });
-    input.addEventListener('keydown', e => {
+    input.addEventListener('keydown', async e => {
       if (e.key === 'Escape') { box.replaceChildren(); return; }
       if (e.key !== 'Enter') return;
       const v = input.value.trim(); if (!v) return;
       e.preventDefault();
+      const r = box.dataset.q === v ? null : await suggest(v);
+      if (r) { ++tok; render(v, r); }
       const first = box.querySelector('button');
       if (first) first.click();
-      else { if (onPick) onPick(); input.value = ''; location.hash = BOOKS.has(v) ? bookHash(v) : refHash(v); }
     });
+  }
+
+  // ---- Search results page
+  async function renderSearch(params) {
+    const tok = ++viewToken;
+    setMode('lib');
+    const q = (params.get('q') || '').trim(), book = params.get('b') || '', exact = params.get('x') === '1';
+    document.title = q ? `“${q}” · Sefer Reader` : 'Search · Sefer Reader';
+    getTOC().catch(() => {});
+    const input = h('input', { type: 'search', id: 'sq', value: q, placeholder: 'Search the text: שמע ישראל, love your neighbor…', autocomplete: 'off', enterkeyhint: 'search', 'aria-label': 'Search the text' });
+    const go = over => {
+      const nq = input.value.trim(); if (!nq) return;
+      const o = Object.assign({ b: book, x: exact }, over || {});
+      location.hash = searchHash(nq, o.b, o.x);
+    };
+    const chip = (label, pressed, fn) => h('button', { type: 'button', class: 'chip-btn', 'aria-pressed': String(pressed), onclick: fn }, label);
+    const opts = h('div', { class: 'chips-row' },
+      book ? chip(`In ${book}`, true, () => go({ b: '' })) : null,
+      book ? chip('All texts', false, () => go({ b: '' })) : chip('All texts', true, () => {}),
+      chip('Words', !exact, () => go({ x: false })), chip('Exact phrase', exact, () => go({ x: true })));
+    const status = h('p', { class: 'res-status' });
+    const list = h('div', { class: 'results' });
+    const moreBtn = h('button', { class: 'btn', hidden: true }, 'Show more');
+    setLib(masthead(), h('form', { class: 'search', onsubmit: ev => { ev.preventDefault(); go(); } }, searchIcon(), input),
+      q ? opts : null, status, list, h('div', { class: 'actions' }, moreBtn), foot());
+    window.scrollTo(0, 0);
+    if (!q) { status.textContent = 'Type what you want to find. Hebrew works best, with or without nikud.'; setTimeout(() => input.focus(), 30); return; }
+    let start = 0;
+    const load = async () => {
+      moreBtn.disabled = true;
+      if (!start) status.textContent = 'Searching…';
+      let r;
+      try { r = await runSearch({ q, book, exact, start }); }
+      catch (e) {
+        if (tok !== viewToken) return;
+        status.replaceChildren(errorEl(e, load));
+        if (e && e.code !== 'offline' && e.code !== 'network') status.append(h('p', { class: 'help' }, "Sefaria's search isn't answering the way this page expects. Try again in a moment."));
+        return;
+      }
+      if (tok !== viewToken) return;
+      start += r.raw;
+      r.items.forEach(it => {
+        const a = h('a', { class: 'result', href: refHash(it.ref) },
+          h('span', { class: 'r-top' }, h('span', { class: 'r-ref' }, it.ref), h('span', { class: 'r-he', lang: 'he', dir: 'rtl' }, it.heRef)),
+          it.snippet ? h('span', { class: 'r-snip', dir: 'auto' }, clean(it.snippet)) : null,
+          it.cats.length ? h('span', { class: 'r-cat' }, it.cats.slice(0, 3).join(' › ')) : null);
+        list.append(a);
+      });
+      const n = list.children.length;
+      status.textContent = n ? `${n}${r.raw >= 50 && r.total && r.total > n ? ' of ' + (r.total >= 10000 ? '10,000+' : r.total.toLocaleString()) : ''} result${n === 1 ? '' : 's'}${book ? ` in ${book}` : ''}` : '';
+      if (!n && r.raw === 0) status.textContent = 'No matches. Try fewer words, or switch to Words. Hebrew spelling without nikud finds the most.';
+      moreBtn.hidden = r.raw < (book && !BOOKS.get(book) ? 200 : 50);
+      moreBtn.disabled = false;
+    };
+    moreBtn.onclick = load;
+    load();
   }
 
   // ================= Reader =================
@@ -942,6 +1056,11 @@
 
   // Open any reference; `at` is a fraction of the section (0 = start) or 'last'.
   async function openRef(ref, at = 0) {
+    const orig = ref;
+    // "Genesis 3:8" opens chapter 3 on that pasuk.
+    let seg = null;
+    const sm = ref.match(/^(.+ \d+[ab]?):(\d+)$/);
+    if (sm) { ref = sm[1]; seg = Number(sm[2]) - 1; }
     const token = ++S.loadToken;
     setMode('reader');
     $('st-page').textContent = '…';
@@ -952,7 +1071,7 @@
     catch (e) {
       if (token !== S.loadToken) return;
       S.loading = false;
-      return showError(e, () => openRef(ref, at), ref);
+      return showError(e, () => openRef(orig, at), ref);
     }
     if (token !== S.loadToken) return;
     S.data = data; S.ref = /-/.test(data.ref) ? data.ref : data.sectionRef;
@@ -968,6 +1087,7 @@
     if (token !== S.loadToken) return;
     layout();
     S.page = at === 'last' ? S.pages - 1 : Math.min(S.pages - 1, Math.floor((at || 0) * S.pages + 0.0001));
+    if (seg != null) { place(seg, 0); markHit(seg); }
     show(false);
     S.loading = false;
     if (S.comm === undefined) commP.then(c => { if (token === S.loadToken && c) { S.comm = c; rerender(); } });
@@ -975,6 +1095,12 @@
     if (S.cur >= 0) $('m-sec').value = String(S.cur);
     loadShape(data.title);
     readAhead(data, token);
+  }
+  function markHit(i) {
+    const el = flow.querySelector(`[data-i="${i}"]`);
+    if (!el) return;
+    el.classList.add('hit');
+    setTimeout(() => el.classList.remove('hit'), 3500);
   }
   async function waitFonts() {
     try {
@@ -1078,9 +1204,10 @@
     if (Math.abs(dx) > 8 || Math.abs(dy) > 8) return;
     const sel = window.getSelection();
     if (sel && String(sel).trim()) return;
-    const w = window.innerWidth, x = e.clientX;
-    if (x < w * 0.35) S.rtl ? next() : prev();
-    else if (x > w * 0.65) S.rtl ? prev() : next();
+    const w = window.innerWidth, x = e.clientX, zone = (SET.tapZone || 35) / 100;
+    const leftIsNext = S.rtl !== (SET.tapSide === 'flipped');
+    if (x < w * zone) leftIsNext ? next() : prev();
+    else if (x > w * (1 - zone)) leftIsNext ? prev() : next();
     else openMenu();
   });
   reader.addEventListener('pointercancel', () => { down = null; });
@@ -1102,7 +1229,7 @@
 
   let lock = null;
   async function wake() {
-    if (lock || !('wakeLock' in navigator) || document.visibilityState !== 'visible') return;
+    if (!SET.wake || lock || !('wakeLock' in navigator) || document.visibilityState !== 'visible') return;
     try { lock = await navigator.wakeLock.request('screen'); lock.addEventListener('release', () => { lock = null; }); } catch {}
   }
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && !reader.hidden) wake(); });
@@ -1124,6 +1251,10 @@
     $('m-nums').checked = SET.nums;
     pressGroup('m-vowels', SET.vowels); pressGroup('m-align', SET.align); pressGroup('m-commfont', SET.commFont);
     $('m-ahead').value = String(SET.ahead);
+    pressGroup('m-tapside', SET.tapSide); pressGroup('m-tapzone', SET.tapZone); pressGroup('m-ui', SET.ui);
+    $('m-wake').checked = SET.wake;
+    $('m-rem-time').value = SET.remTime;
+    updateAppBox();
   }
   function openMenu() {
     const inReader = !reader.hidden && S.data;
@@ -1157,7 +1288,7 @@
   $('m-sec').onchange = e => { const i = Number(e.target.value); if (i >= 0) { closeMenu(); openRef(S.sections[i].ref, 0); } };
   $('m-prevsec').onclick = () => { if (S.data && S.data.prev) { closeMenu(); openRef(S.data.prev, 0); } };
   $('m-nextsec').onclick = () => { if (S.data && S.data.next) { closeMenu(); openRef(S.data.next, 0); } };
-  attachSearch($('m-q'), $('m-sugg'), closeMenu);
+  attachSearch($('m-q'), $('m-sugg'), closeMenu, () => S.data && S.data.title);
 
   function bindGroup(id, key, after) {
     document.querySelectorAll(`#${id} .seg-btn`).forEach(b => b.onclick = () => {
@@ -1356,6 +1487,48 @@
     S.comm = c;
     rerender();
   }
+  bindGroup('m-tapside', 'tapSide');
+  document.querySelectorAll('#m-tapzone .seg-btn').forEach(b => b.onclick = () => { SET.tapZone = Number(b.dataset.v); pressGroup('m-tapzone', SET.tapZone); applySettings(); });
+  bindGroup('m-ui', 'ui');
+  $('m-wake').onchange = e => { SET.wake = e.target.checked; applySettings(); if (SET.wake) wake(); else if (lock) lock.release().catch(() => {}); };
+
+  // ---- App: install, full screen, daily reminder
+  let installEvt = null;
+  const standalone = () => (window.matchMedia && matchMedia('(display-mode: standalone)').matches) || navigator.standalone === true;
+  window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); installEvt = e; updateAppBox(); });
+  window.addEventListener('appinstalled', () => { installEvt = null; updateAppBox(); });
+  function updateAppBox() {
+    const box = $('m-install');
+    const ios = /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    if (standalone()) box.replaceChildren(h('span', { class: 'off-status' }, '✓ Running as an installed app'));
+    else if (installEvt) box.replaceChildren(h('button', { class: 'btn', onclick: async () => { try { installEvt.prompt(); await installEvt.userChoice; } catch {} installEvt = null; updateAppBox(); } }, 'Install as an app'));
+    else box.replaceChildren(h('span', { class: 'off-status' }, ios ? 'To install: tap Share, then Add to Home Screen.' : 'To install: use your browser menu → Install app, or Add to Home screen.'));
+    const fs = $('m-fs');
+    fs.hidden = !document.documentElement.requestFullscreen;
+    fs.textContent = document.fullscreenElement ? 'Exit full screen' : 'Full screen';
+  }
+  $('m-fs').onclick = () => {
+    if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+    else document.documentElement.requestFullscreen({ navigationUI: 'hide' }).catch(() => toast('Full screen was blocked here.'));
+  };
+  document.addEventListener('fullscreenchange', () => { updateAppBox(); setTimeout(relayout, 150); });
+  // A daily calendar reminder: works on any phone or computer, no account or server needed.
+  $('m-rem-time').onchange = e => { SET.remTime = e.target.value || '07:30'; applySettings(); };
+  $('m-rem-go').onclick = () => {
+    const [hh, mm] = (SET.remTime || '07:30').split(':').map(Number);
+    const d = new Date(); d.setHours(hh, mm, 0, 0);
+    const p2 = n => String(n).padStart(2, '0');
+    const local = `${d.getFullYear()}${p2(d.getMonth() + 1)}${p2(d.getDate())}T${p2(hh)}${p2(mm)}00`;
+    const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d+/, '');
+    const url = location.origin + location.pathname;
+    const ics = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Sefer Reader//EN', 'CALSCALE:GREGORIAN', 'BEGIN:VEVENT',
+      `UID:sefer-reader-daily@${location.hostname || 'local'}`, `DTSTAMP:${stamp}`, `DTSTART:${local}`, 'DURATION:PT20M', 'RRULE:FREQ=DAILY',
+      'SUMMARY:Learn: Sefer Reader', `DESCRIPTION:Time to learn. Open ${url}`, `URL:${url}`,
+      'BEGIN:VALARM', 'TRIGGER:PT0M', 'ACTION:DISPLAY', 'DESCRIPTION:Time to learn', 'END:VALARM', 'END:VEVENT', 'END:VCALENDAR'].join('\r\n');
+    const a = h('a', { href: URL.createObjectURL(new Blob([ics], { type: 'text/calendar' })), download: 'sefer-reader-daily.ics' });
+    document.body.append(a); a.click(); a.remove();
+    toast('Open the file to add it to your calendar.');
+  };
   $('m-ahead').onchange = e => { SET.ahead = Number(e.target.value); applySettings(); };
   $('m-hefont').onchange = e => { SET.heFont = e.target.value; applySettings(); relayoutAfterFonts(); };
   $('m-enfont').onchange = e => { SET.enFont = e.target.value; applySettings(); relayoutAfterFonts(); };
@@ -1376,6 +1549,7 @@
     let hsh;
     try { hsh = decodeURIComponent(raw); } catch { hsh = raw; }
     if (!hsh || hsh === '/') return renderHome();
+    if (/^\/s(\?|$)/.test(raw)) return renderSearch(new URLSearchParams(raw.includes('?') ? raw.slice(raw.indexOf('?') + 1) : ''));
     if (hsh.startsWith('/c/')) return renderCategory(raw.slice(3).split('/').map(p => { try { return decodeURIComponent(p); } catch { return p; } }));
     if (hsh.startsWith('/b/')) return renderBook(hsh.slice(3));
     const ref = hsh.replace(/_/g, ' ').trim();

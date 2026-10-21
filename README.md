@@ -9,6 +9,8 @@ A distraction-free, page-by-page reader for any sefer on [Sefaria](https://www.s
 - A library home page: search, Continue reading (with progress), and browsing by category the way Sefaria's home page does, down to a page for each book with its description, author and date, and a grid of chapters or dapim.
 - Commentaries inline: in the reader menu, pick from the commentaries Sefaria links to the current text (Rashi, Ramban, Onkelos, Tosafot, Mishnah Berurah and more). Each comment appears under its pasuk or se'if, smaller and set in, in Rashi script by default. Choices are remembered per book.
 - Print or save as PDF from the reader menu: text reflowed for A4 or Letter in two columns (Hebrew starting on the right), or Hebrew and English side by side, with chosen commentaries, a running header and page numbers. Print this section or this and the next 1 to 19.
+- Search the text itself (Hebrew works best): from the home page search box, or from a sefer's page or the reader menu to search just that sefer. Matching words are highlighted, "Exact phrase" is available, and tapping a result opens the chapter on that pasuk.
+- App feel: install to the home screen, full screen, tap side and tap area, larger menus and buttons, keep-screen-on, and a daily reminder you add to your calendar.
 - Today's learning on the home page (Daf Yomi, parasha, Rambam, Mishnah Yomit and Sefaria's other daily schedules), with a Choose button to show only the ones you follow.
 - Works offline: sections you read and the ones after them are saved (5 to 50 ahead, in settings), and any book can be downloaded from its page.
 - Text with trop uses a font that places the cantillation marks correctly, and trop or all nikud can be hidden.
