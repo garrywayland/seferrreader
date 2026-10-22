@@ -25,7 +25,7 @@
     ['Inter', 'Inter (sans)'],
   ];
   const MARGINS = [0, 12, 32, 56, 88, 128];
-  const DEFAULTS = { lang: 'he', theme: 'auto', heFont: 'Frank Ruhl Libre', enFont: 'Crimson Pro', size: 21, lh: 1.78, margin: 2, cols: 'auto', nums: true, vowels: 'all', align: 'auto', ahead: 10, yomiHidden: [], comm: {}, commFont: 'rashi', tapSide: 'standard', tapZone: 35, ui: 'normal', wake: true, remTime: '07:30', print: { count: 0, paper: 'A4', cols: '2', size: 'M', margin: 'normal', comm: true } };
+  const DEFAULTS = { lang: 'he', theme: 'auto', heFont: 'Frank Ruhl Libre', enFont: 'Crimson Pro', size: 21, lh: 1.78, margin: 2, cols: 'auto', nums: true, vowels: 'all', align: 'auto', ahead: 10, yomiHidden: [], comm: {}, commFont: 'rashi', select: !(window.matchMedia && matchMedia('(pointer: coarse)').matches), tapSide: 'standard', tapZone: 35, ui: 'normal', wake: true, remTime: '07:30', print: { count: 0, paper: 'A4', cols: '2', size: 'M', margin: 'normal', comm: true } };
   const SET = Object.assign({}, DEFAULTS, readJSON(KEY_SET, {}));
 
   function readJSON(k, fallback) { try { const v = JSON.parse(localStorage.getItem(k)); return v == null ? fallback : v; } catch { return fallback; } }
@@ -70,6 +70,8 @@
     if (SET.theme === 'auto') document.documentElement.removeAttribute('data-theme');
     else document.documentElement.setAttribute('data-theme', SET.theme);
     flow.classList.toggle('nonums', !SET.nums);
+    reader.classList.toggle('noselect', !SET.select);
+    if (!SET.select) { try { window.getSelection().removeAllRanges(); } catch {} }
     st.setProperty('--ui-zoom', String({ normal: 1, large: 1.15, larger: 1.3 }[SET.ui] || 1));
     // Colour the browser/phone bars to match the page.
     try {
@@ -1202,8 +1204,9 @@
       return;
     }
     if (Math.abs(dx) > 8 || Math.abs(dy) > 8) return;
+    // A tap while text is selected just clears the selection, as in any reader.
     const sel = window.getSelection();
-    if (sel && String(sel).trim()) return;
+    if (sel && String(sel).trim()) { sel.removeAllRanges(); return; }
     const w = window.innerWidth, x = e.clientX, zone = (SET.tapZone || 35) / 100;
     const leftIsNext = S.rtl !== (SET.tapSide === 'flipped');
     if (x < w * zone) leftIsNext ? next() : prev();
@@ -1253,6 +1256,7 @@
     $('m-ahead').value = String(SET.ahead);
     pressGroup('m-tapside', SET.tapSide); pressGroup('m-tapzone', SET.tapZone); pressGroup('m-ui', SET.ui);
     $('m-wake').checked = SET.wake;
+    $('m-select').checked = SET.select;
     $('m-rem-time').value = SET.remTime;
     updateAppBox();
   }
@@ -1490,6 +1494,10 @@
   bindGroup('m-tapside', 'tapSide');
   document.querySelectorAll('#m-tapzone .seg-btn').forEach(b => b.onclick = () => { SET.tapZone = Number(b.dataset.v); pressGroup('m-tapzone', SET.tapZone); applySettings(); });
   bindGroup('m-ui', 'ui');
+  $('m-select').onchange = e => { SET.select = e.target.checked; applySettings(); };
+  // Long-press should not pop up the browser's menu while selection is off.
+  reader.addEventListener('contextmenu', e => { if (!SET.select) e.preventDefault(); });
+  reader.addEventListener('selectstart', e => { if (!SET.select) e.preventDefault(); });
   $('m-wake').onchange = e => { SET.wake = e.target.checked; applySettings(); if (SET.wake) wake(); else if (lock) lock.release().catch(() => {}); };
 
   // ---- App: install, full screen, daily reminder
@@ -1504,14 +1512,24 @@
     else if (installEvt) box.replaceChildren(h('button', { class: 'btn', onclick: async () => { try { installEvt.prompt(); await installEvt.userChoice; } catch {} installEvt = null; updateAppBox(); } }, 'Install as an app'));
     else box.replaceChildren(h('span', { class: 'off-status' }, ios ? 'To install: tap Share, then Add to Home Screen.' : 'To install: use your browser menu → Install app, or Add to Home screen.'));
     const fs = $('m-fs');
-    fs.hidden = !document.documentElement.requestFullscreen;
-    fs.textContent = document.fullscreenElement ? 'Exit full screen' : 'Full screen';
+    fs.hidden = !(document.documentElement.requestFullscreen || document.documentElement.webkitRequestFullscreen);
+    fs.textContent = fsEl() ? 'Exit full screen' : 'Full screen';
   }
-  $('m-fs').onclick = () => {
-    if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
-    else document.documentElement.requestFullscreen({ navigationUI: 'hide' }).catch(() => toast('Full screen was blocked here.'));
+  const fsEl = () => document.fullscreenElement || document.webkitFullscreenElement;
+  $('m-fs').onclick = async () => {
+    const de = document.documentElement;
+    try {
+      if (fsEl()) { await (document.exitFullscreen || document.webkitExitFullscreen).call(document); return; }
+      await (de.requestFullscreen || de.webkitRequestFullscreen).call(de);
+      closeMenu();
+      toast('Full screen. Swipe down from the top to exit.');
+    } catch (e) {
+      toast(`Full screen isn't available here${e && e.name ? ' (' + e.name + ')' : ''}. Try installing the app instead.`);
+    }
   };
-  document.addEventListener('fullscreenchange', () => { updateAppBox(); setTimeout(relayout, 150); });
+  const onFs = () => { updateAppBox(); setTimeout(relayout, 150); };
+  document.addEventListener('fullscreenchange', onFs);
+  document.addEventListener('webkitfullscreenchange', onFs);
   // A daily calendar reminder: works on any phone or computer, no account or server needed.
   $('m-rem-time').onchange = e => { SET.remTime = e.target.value || '07:30'; applySettings(); };
   $('m-rem-go').onclick = () => {

@@ -330,3 +330,6 @@ body.in-reader #menu .lib-only { display: none; }
 .app-row { margin: 8px 0; gap: 10px 14px; }
 .app-row input[type="time"] { font: inherit; font-size: 16px; padding: .4em .6em; border: 1px solid var(--rule); border-radius: 10px; background: var(--bg); color: var(--fg); }
 #menu .toggle { margin: 6px 0; }
+
+/* Touch screens: a tap turns the page, it never selects words */
+#reader.noselect, #reader.noselect * { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
