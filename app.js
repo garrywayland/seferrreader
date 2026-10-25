@@ -160,6 +160,25 @@
   // ================= Links =================
   const refHash = ref => '#' + encodeURIComponent(ref.replace(/ /g, '_')).replace(/%2C/g, ',').replace(/%3A/g, ':');
   const bookHash = title => '#/b/' + encodeURIComponent(title);
+  // Sefaria links: https://www.sefaria.org/Genesis.3.8?lang=bi  ->  "Genesis 3:8"
+  function parseSefariaUrl(text) {
+    const m = String(text || '').match(/https?:\/\/(?:[\w-]+\.)?sefaria\.org(?:\.il)?\/([^\s?#]+)/i);
+    if (!m) return null;
+    let seg = m[1].split('/')[0];
+    try { seg = decodeURIComponent(seg); } catch {}
+    if (!seg || /^(sheets|topics|collections|community|texts|calendars|profile|search|about|help|donate|settings|notifications|translations|updates|saved|history)$/i.test(seg)) return { error: 'not_text' };
+    seg = seg.replace(/_/g, ' ');
+    const r = seg.match(/^(.+?)\.(\d.*)$/);
+    if (!r) return { book: seg };
+    return { ref: `${r[1]} ${r[2].replace(/\./g, ':')}` };
+  }
+  // The same passage on sefaria.org
+  function sefariaUrl(ref) {
+    const m = String(ref).match(/^(.*?) (\d\S*)$/);
+    const title = (m ? m[1] : ref).replace(/ /g, '_');
+    const rest = m ? '.' + m[2].replace(/:/g, '.') : '';
+    return 'https://www.sefaria.org/' + encodeURIComponent(title + rest);
+  }
   const catHash = path => '#/c/' + path.map(encodeURIComponent).join('/');
 
   // ================= Sefaria API =================
@@ -445,7 +464,7 @@
   }
   function searchBox(autofocus, scope) {
     const box = h('div', { class: 'sugg', role: 'listbox' });
-    const input = h('input', { type: 'search', id: 'q', placeholder: 'Search for a sefer, a reference, or words in the text…', autocomplete: 'off', enterkeyhint: 'go', 'aria-label': 'Search' });
+    const input = h('input', { type: 'search', id: 'q', placeholder: 'Search, or paste a Sefaria link…', autocomplete: 'off', enterkeyhint: 'go', 'aria-label': 'Search' });
     attachSearch(input, box, null, scope ? () => scope : null);
     if (autofocus) setTimeout(() => input.focus(), 30);
     return h('div', { class: 'search' }, searchIcon(), input, box);
@@ -716,6 +735,18 @@
   function attachSearch(input, box, onPick, scopeFn) {
     let t, tok = 0;
     const go = hash => { box.replaceChildren(); input.value = ''; if (onPick) onPick(); location.hash = hash; };
+    // A pasted Sefaria link opens straight away.
+    const openLink = text => {
+      const u = parseSefariaUrl(text);
+      if (!u) return false;
+      if (u.error) { toast("That Sefaria link isn't a text. Paste a link to a sefer, chapter or verse."); return true; }
+      go(u.book ? bookHash(u.book) : refHash(u.ref));
+      return true;
+    };
+    input.addEventListener('paste', e => {
+      const t = (e.clipboardData || window.clipboardData || { getData: () => '' }).getData('text');
+      if (parseSefariaUrl(t)) { e.preventDefault(); openLink(t); }
+    });
     const pick = it => go(it.search ? searchHash(it.key, it.search.b, false) : it.book ? bookHash(it.key) : refHash(it.key));
     // Name matches (books, references) first, then ways to search the text itself.
     async function suggest(q) {
@@ -745,7 +776,7 @@
       clearTimeout(t);
       const q = input.value.trim();
       box.dataset.q = '';
-      if (q.length < 2) { box.replaceChildren(); return; }
+      if (q.length < 2 || /^https?:\/\//i.test(q)) { box.replaceChildren(); if (parseSefariaUrl(q)) openLink(q); return; }
       t = setTimeout(async () => {
         const my = ++tok;
         const r = await suggest(q);
@@ -757,6 +788,7 @@
       if (e.key !== 'Enter') return;
       const v = input.value.trim(); if (!v) return;
       e.preventDefault();
+      if (openLink(v)) return;
       const r = box.dataset.q === v ? null : await suggest(v);
       if (r) { ++tok; render(v, r); }
       const first = box.querySelector('button');
@@ -1061,7 +1093,7 @@
     const orig = ref;
     // "Genesis 3:8" opens chapter 3 on that pasuk.
     let seg = null;
-    const sm = ref.match(/^(.+ \d+[ab]?):(\d+)$/);
+    const sm = ref.match(/^(.+ \d+[ab]?(?::\d+)*):(\d+)$/);
     if (sm) { ref = sm[1]; seg = Number(sm[2]) - 1; }
     const token = ++S.loadToken;
     setMode('reader');
@@ -1268,6 +1300,7 @@
     if (inReader) {
       renderCommMenu();
       $('m-about').href = bookHash(S.data.title);
+      $('m-sef').href = sefariaUrl(S.ref || S.data.ref);
       $('m-about').hidden = !S.data.title;
       $('m-goto').hidden = !S.sections.length;
       if (S.cur >= 0) $('m-sec').value = String(S.cur);
@@ -1278,6 +1311,10 @@
   $('m-close').onclick = closeMenu;
   $('scrim').onclick = () => { closeMenu(); closePrint(); };
   $('m-home').onclick = closeMenu;
+  $('m-copy').onclick = async () => {
+    try { await navigator.clipboard.writeText(location.href); toast('Link copied.'); }
+    catch { toast('Copy the address from your browser bar.'); }
+  };
   $('m-about').onclick = closeMenu;
 
   function fillSectionSelect() {
@@ -1578,6 +1615,16 @@
   window.addEventListener('hashchange', route);
 
   applySettings();
+  // Sharing a Sefaria link to the installed app arrives as ?url=… / ?text=…
+  (() => {
+    const p = new URLSearchParams(location.search);
+    const t = ['url', 'text', 'title'].map(k => p.get(k)).filter(Boolean).join(' ');
+    if (!t) return;
+    const u = parseSefariaUrl(t);
+    const hash = u && !u.error ? (u.book ? bookHash(u.book) : refHash(u.ref)) : '#/';
+    try { history.replaceState(null, '', location.pathname + hash); } catch {}
+    if (!u || u.error) setTimeout(() => toast("That link isn't a Sefaria text."), 800);
+  })();
   route();
   if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
     navigator.serviceWorker.register('sw.js').catch(() => {});

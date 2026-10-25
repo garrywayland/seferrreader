@@ -1,5 +1,5 @@
 // Offline support: the app shell, fonts, library metadata and every text you open are kept in the browser.
-const SHELL = 'shell-v5';
+const SHELL = 'shell-v6';
 const TEXTS = 'sefer-texts-v1';
 const META = 'sefer-meta-v1';
 const FONTS = 'sefer-fonts-v1';

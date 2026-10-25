@@ -18,7 +18,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="preconnect" href="https://www.sefaria.org" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Frank+Ruhl+Libre:wght@400;500;700&family=Crimson+Pro:ital,wght@0,400;0,600;1,400&display=swap">
-<link rel="stylesheet" href="styles.css?v=5">
+<link rel="stylesheet" href="styles.css?v=6">
 </head>
 <body class="in-lib">
 
@@ -57,11 +57,13 @@
     <a class="btn" href="#/" id="m-home">Library</a>
     <a class="btn" href="#/" id="m-about">About this book</a>
     <button class="btn" id="m-print">Print…</button>
+    <a class="btn" id="m-sef" href="https://www.sefaria.org" target="_blank" rel="noopener">Open on Sefaria</a>
+    <button class="btn" id="m-copy">Copy link</button>
   </div>
 
   <div class="reader-only">
-    <label class="lbl" for="m-q">Open a sefer, or search the text</label>
-    <input type="search" id="m-q" placeholder="Berakhot, Genesis 12, or words to find" autocomplete="off" enterkeyhint="go">
+    <label class="lbl" for="m-q">Open a sefer, search the text, or paste a Sefaria link</label>
+    <input type="search" id="m-q" placeholder="Berakhot, Genesis 12, words, or a Sefaria link" autocomplete="off" enterkeyhint="go">
     <div class="sugg" id="m-sugg"></div>
   </div>
 
@@ -274,6 +276,6 @@
 <div id="print" aria-hidden="true"></div>
 <style id="pstyle"></style>
 
-<script src="app.js?v=5"></script>
+<script src="app.js?v=6"></script>
 </body>
 </html>
