@@ -18,7 +18,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="preconnect" href="https://www.sefaria.org" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Frank+Ruhl+Libre:wght@400;500;700&family=Crimson+Pro:ital,wght@0,400;0,600;1,400&display=swap">
-<link rel="stylesheet" href="styles.css?v=6">
+<link rel="stylesheet" href="styles.css?v=7">
 </head>
 <body class="in-lib">
 
@@ -61,13 +61,24 @@
     <button class="btn" id="m-copy">Copy link</button>
   </div>
 
-  <div class="reader-only">
+  <div class="mikra-only" id="m-mikra">
+    <span class="lbl">Shnayim Mikra</span>
+    <div class="chips-row" id="mk-days"></div>
+    <div id="mk-opts"></div>
+    <div class="row app-row">
+      <button class="btn" id="mk-done">Mark day done</button>
+      <span class="seg-group"><button class="seg-btn" id="mk-smaller" aria-label="Smaller text">A−</button><button class="seg-btn" id="mk-bigger" aria-label="Larger text">A+</button></span>
+      <a class="btn" href="#/shnayim">The week</a>
+    </div>
+  </div>
+
+  <div class="reader-only" data-nomikra>
     <label class="lbl" for="m-q">Open a sefer, search the text, or paste a Sefaria link</label>
     <input type="search" id="m-q" placeholder="Berakhot, Genesis 12, words, or a Sefaria link" autocomplete="off" enterkeyhint="go">
     <div class="sugg" id="m-sugg"></div>
   </div>
 
-  <div class="reader-only" id="m-goto">
+  <div class="reader-only" id="m-goto" data-nomikra>
     <label class="lbl" for="m-sec">Go to</label>
     <div class="secnav">
       <button class="btn" id="m-prevsec" aria-label="Previous section">‹</button>
@@ -76,7 +87,7 @@
     </div>
   </div>
 
-  <div class="reader-only">
+  <div class="reader-only" data-nomikra>
     <span class="lbl">Commentaries <span class="val" id="m-comm-status"></span></span>
     <div id="m-comm"></div>
     <div class="row comm-font">
@@ -94,7 +105,7 @@
   </div>
 
   <div class="opts">
-    <div class="opt">
+    <div class="opt" data-nomikra>
       <span class="lbl">Text</span>
       <div class="seg-group" id="m-lang">
         <button class="seg-btn" data-v="he">עברית</button>
@@ -276,6 +287,6 @@
 <div id="print" aria-hidden="true"></div>
 <style id="pstyle"></style>
 
-<script src="app.js?v=6"></script>
+<script src="app.js?v=7"></script>
 </body>
 </html>

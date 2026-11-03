@@ -333,3 +333,35 @@ body.in-reader #menu .lib-only { display: none; }
 
 /* Touch screens: a tap turns the page, it never selects words */
 #reader.noselect, #reader.noselect * { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+
+/* ---------------- Shnayim Mikra ---------------- */
+body.is-mikra [data-nomikra] { display: none !important; }
+body:not(.is-mikra) .mikra-only { display: none; }
+.mk-days { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 8px; }
+.mk-day { position: relative; display: grid; gap: 2px; padding: 10px 12px; border: 1px solid var(--rule); border-radius: 12px; background: var(--panel); text-decoration: none; min-width: 0; }
+.mk-day:hover { background: var(--hover); }
+.mk-day.today { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.mk-day.done { background: color-mix(in srgb, var(--accent) 9%, var(--panel)); }
+.mk-day .d-he { font-family: var(--he); font-size: 18px; font-weight: 500; }
+.mk-day .d-al { font-family: var(--he); font-size: 13px; color: var(--muted); }
+.mk-day .d-rng { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.mk-day .d-ck { position: absolute; top: 8px; inset-inline-end: 10px; color: var(--accent); font-weight: 700; }
+.mk-parsha { font-family: var(--he); font-size: 1.15em; font-weight: 500; }
+.mk-opts { margin-top: 4px; }
+/* Reader rows */
+.brow.mk-head { display: block; background: none; text-align: center; font-family: var(--he); font-weight: 700; color: var(--accent); font-size: .9em; margin: .2em 0 0; }
+.brow .mk { font-family: var(--comm-he, var(--he)); font-size: .8em; line-height: 1.65; text-align: start; }
+.brow .mk .onk-t { font-family: var(--he); font-size: 1.08em; }
+.brow .mk cite { font-style: normal; font-family: var(--ui); font-weight: 600; font-size: .78em; color: var(--accent); }
+.mk-solo .brow { grid-template-columns: minmax(0, 1fr); background: none; }
+.mk-solo .brow .seg:last-child:not(:first-child) { display: none; }
+.mk-solo .brow.mk-head { display: block; }
+.tg { display: block; color: var(--accent); font-size: .88em; margin-top: .15em; line-height: 1.7; }
+.tg-plain { color: var(--accent); }
+.rs { display: block; font-family: var(--comm-he, var(--he)); font-size: .76em; line-height: 1.6; border-inline-start: 2px solid var(--rule); padding-inline-start: .6em; margin-top: .3em; color: var(--fg); }
+.again { display: block; opacity: .75; margin-top: .3em; }
+@media print {
+  .mk-solo .brow { background: none; }
+  .tg, .tg-plain { color: #1b3a73; }
+  .brow.mk-head { color: #000; }
+}

@@ -28,6 +28,7 @@
   const DEFAULTS = { lang: 'he', theme: 'auto', heFont: 'Frank Ruhl Libre', enFont: 'Crimson Pro', size: 21, lh: 1.78, margin: 2, cols: 'auto', nums: true, vowels: 'all', align: 'auto', ahead: 10, yomiHidden: [], comm: {}, commFont: 'rashi', select: !(window.matchMedia && matchMedia('(pointer: coarse)').matches), tapSide: 'standard', tapZone: 35, ui: 'normal', wake: true, remTime: '07:30', print: { count: 0, paper: 'A4', cols: '2', size: 'M', margin: 'normal', comm: true } };
   const SET = Object.assign({}, DEFAULTS, readJSON(KEY_SET, {}));
 
+  SET.shn = Object.assign({ fmt: 'side', left: 'rashi-onk', twice: false, week: 'this', loc: 'auto', done: {} }, SET.shn);
   function readJSON(k, fallback) { try { const v = JSON.parse(localStorage.getItem(k)); return v == null ? fallback : v; } catch { return fallback; } }
   function writeJSON(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} }
 
@@ -85,7 +86,7 @@
   let HIST = readJSON(KEY_HIST, []);
   if (!Array.isArray(HIST)) HIST = [];
   function recordHistory() {
-    if (!S.data || !S.data.title) return;
+    if (!S.data || !S.data.title || S.data.mikra) return;
     const pct = S.sections.length && S.cur >= 0 ? (S.cur + (S.page + 1) / S.pages) / S.sections.length : null;
     const e = { title: S.data.title, heTitle: S.data.heTitle, ref: S.ref, heRef: S.data.heRef, frac: S.pages > 1 ? S.page / S.pages : 0, pct, t: Date.now() };
     HIST = [e, ...HIST.filter(h => h.title !== e.title)].slice(0, 12);
@@ -348,13 +349,20 @@
     const raw = await getJSON(`${API}/shape/${enc(title)}`);
     return (Array.isArray(raw) ? raw : [raw]).filter(x => x && x.title && 'chapters' in x);
   });
-  function getCalendar() {
+  function diasporaFlag() {
     let tz = 'UTC';
     try { tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'; } catch {}
-    const diaspora = tz === 'Asia/Jerusalem' ? 0 : 1;
+    const loc = SET.shn.loc;
+    return loc === 'israel' ? 0 : loc === 'diaspora' ? 1 : (tz === 'Asia/Jerusalem' ? 0 : 1);
+  }
+  function getCalendar(offsetDays = 0) {
+    let tz = 'UTC';
+    try { tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'; } catch {}
+    const diaspora = diasporaFlag();
     const d = new Date();
+    d.setDate(d.getDate() + offsetDays);
     const day = `year=${d.getFullYear()}&month=${d.getMonth() + 1}&day=${d.getDate()}`;
-    return once('cal:' + day, async () => {
+    return once(`cal:${diaspora}:` + day, async () => {
       const r = await getJSON(`${API}/calendars?diaspora=${diaspora}&timezone=${encodeURIComponent(tz)}&${day}`);
       return (r.calendar_items || [])
         .map(it => ({ ...it, ref: it.ref || (Array.isArray(it.refs) && it.refs[0]) || null, title: it.title || { en: it.category || '' } }))
@@ -441,7 +449,7 @@
     document.body.classList.toggle('in-reader', r);
     document.body.classList.toggle('in-lib', !r);
     libEl.hidden = r; reader.hidden = !r; $('status').hidden = !r; $('bar').hidden = !r;
-    if (!r) hideMsg();
+    if (!r) { hideMsg(); document.body.classList.remove('is-mikra'); }
   }
 
   const searchIcon = () => {
@@ -519,9 +527,14 @@
     window.scrollTo(0, 0);
     getCalendar().then(items => {
       if (tok !== viewToken) return;
+      const pa = items.find(i => /parash/i.test(i.title.en));
+      if (pa && pa.displayValue) {
+        const k = slug(pa.displayValue.en || ''), d = new Date().getDay(), n = doneArr(k).filter(Boolean).length;
+        items = [{ title: { en: 'Shnayim Mikra', he: 'שניים מקרא' }, displayValue: { he: `${pa.displayValue.he || pa.displayValue.en} · ${dayLabel(d)}`, en: `${pa.displayValue.en} · ${n} of 7 days done` }, ref: '', href: '#/shnayim' }, ...items];
+      }
       const cards = items.map(it => {
         const key = it.title.en;
-        const a = h('a', { class: 'yomi-card' + (SET.yomiHidden.includes(key) ? ' off' : ''), href: refHash(it.ref) },
+        const a = h('a', { class: 'yomi-card' + (SET.yomiHidden.includes(key) ? ' off' : ''), href: it.href || refHash(it.ref) },
           h('span', { class: 'y-top' }, h('span', { class: 'y-en' }, it.title.en), h('span', { class: 'y-he', lang: 'he' }, it.title.he || '')),
           h('span', { class: 'y-val', lang: 'he', dir: 'rtl' }, (it.displayValue && it.displayValue.he) || it.heRef || it.ref),
           h('span', { class: 'y-sub' }, (it.displayValue && it.displayValue.en) || it.ref),
@@ -906,6 +919,20 @@
     return box;
   }
   function render() {
+    if (S.data.mikra) {
+      const M = S.data.mikra;
+      S.rtl = true; S.both = true;
+      flow.replaceChildren(); flow.dir = 'rtl';
+      flow.classList.toggle('nonums', !SET.nums);
+      flow.classList.toggle('mk-solo', SET.shn.fmt !== 'side');
+      const trop = !TROP_FONTS.has(SET.heFont) && TROP_RE.test(M.verses.map(v => v.he).join(''));
+      flow.classList.toggle('trop', trop);
+      S.fontWait = Promise.all([trop ? ensureFont('Noto Serif Hebrew') : null, SET.commFont === 'rashi' ? ensureFont('Noto Rashi Hebrew') : null]);
+      S.head = [h('h2', { class: 'sec', dir: 'rtl' }, S.data.heRef)];
+      if (M.parsha.approx) S.head.push(h('p', { class: 'note' }, 'מחולק לשבעה חלקים שווים'));
+      S.rows = mikraRows(M);
+      return;
+    }
     const en = S.data.en, he = S.data.he.map(prepHe);
     let mode = SET.lang, note = '';
     const hasEn = en.some(Boolean), hasHe = he.some(Boolean);
@@ -970,22 +997,23 @@
       const t = toks[i];
       if (t[0] === '<') {
         const m = t.match(/^<(\/)?([a-z0-9]+)/i);
-        if (m && !/^br$/i.test(m[2])) { if (m[1]) stack.pop(); else stack.push(m[2].toLowerCase()); }
+        if (m && !/^br$/i.test(m[2])) { if (m[1]) stack.pop(); else stack.push({ name: m[2].toLowerCase(), tag: t }); }
         headStr += t;
       } else if (/^\s+$/.test(t)) headStr += t;
       else { if (count === n) break; count++; headStr += t; }
     }
-    const close = stack.slice().reverse().map(t => `</${t}>`).join('');
-    const open = stack.map(t => `<${t}>`).join('');
+    const close = stack.slice().reverse().map(x => `</${x.name}>`).join('');
+    const open = stack.map(x => x.tag).join('');
     return [headStr.trim() + close, open + toks.slice(i).join('').trim()];
   }
   function rowEl(r) {
+    if (r.head) return h('div', { class: 'brow mk-head' }, r.he);
     const row = h('div', { class: r.comm ? 'brow comm-row' : 'brow', 'data-i': r.i });
     const he = h('p', { class: 'seg he', dir: 'rtl', lang: 'he' });
-    if (r.i != null && r.he) he.append(h('span', { class: 'n' }, gem(r.i + 1, false)));
+    if (r.i != null && r.he) he.append(h('span', { class: 'n' }, r.num || gem(r.i + 1, false)));
     he.insertAdjacentHTML('beforeend', r.he);
-    const en = h('p', { class: 'seg en', dir: 'ltr', lang: 'en' });
-    if (r.i != null && !r.he) en.append(h('span', { class: 'n' }, String(r.i + 1)));
+    const en = r.lhe ? h('p', { class: 'seg he mk', dir: 'rtl', lang: 'he' }) : h('p', { class: 'seg en', dir: 'ltr', lang: 'en' });
+    if (r.i != null && !r.he && !r.lhe) en.append(h('span', { class: 'n' }, String(r.i + 1)));
     en.insertAdjacentHTML('beforeend', r.en);
     row.append(he, en);
     return row;
@@ -996,7 +1024,7 @@
     let lo = 0, hi = 1, best = null;
     for (let k = 0; k < 14; k++) {
       const f = (lo + hi) / 2;
-      const a = { he: splitHtml(r.he, Math.round(nh * f))[0], en: splitHtml(r.en, Math.round(ne * f))[0], i: r.i };
+      const a = { ...r, he: splitHtml(r.he, Math.round(nh * f))[0], en: splitHtml(r.en, Math.round(ne * f))[0] };
       const el = rowEl(a);
       page.append(el);
       const fits = page.offsetHeight <= H;
@@ -1009,7 +1037,7 @@
     }
     const kh = Math.max(force ? 1 : 0, Math.round(nh * best)), ke = Math.round(ne * best);
     const [ha, hb] = splitHtml(r.he, Math.min(kh, nh)), [ea, eb] = splitHtml(r.en, ke);
-    return [{ he: ha, en: ea, i: r.i }, { he: hb, en: eb, i: null }];
+    return [{ ...r, he: ha, en: ea }, { ...r, he: hb, en: eb, i: null, num: null }];
   }
   function layoutBoth(W, H) {
     const G = 48;
@@ -1036,6 +1064,7 @@
       if (page.offsetHeight <= H) continue;
       el.remove();
       const empty = !page.querySelector('.brow');
+      if (r.head) { if (empty) page.append(rowEl(r)); else { queue.unshift(r); page = newPage(); } continue; }
       const parts = splitRow(r, page, H, empty && page.children.length === 0);
       if (parts) { page.append(rowEl(parts[0])); if (wordCount(parts[1].he) + wordCount(parts[1].en)) queue.unshift(parts[1]); }
       else if (empty && page.children.length) { const p2 = splitRow(r, page, H, true); page.append(rowEl(p2[0])); queue.unshift(p2[1]); }
@@ -1090,6 +1119,8 @@
 
   // Open any reference; `at` is a fraction of the section (0 = start) or 'last'.
   async function openRef(ref, at = 0) {
+    if (/^~m\//.test(ref)) return openMikra(ref, at);
+    document.body.classList.remove('is-mikra');
     const orig = ref;
     // "Genesis 3:8" opens chapter 3 on that pasuk.
     let seg = null;
@@ -1215,6 +1246,7 @@
     if (!S.data || S.loading) return;
     if (S.page < S.pages - 1) { S.page++; show(); }
     else if (S.data.next) openRef(S.data.next, 0);
+    else if (S.data.mikra) { setDone(S.data.mikra.key, S.data.mikra.day, true); toast('✓ סיימת את קריאת היום'); }
     else toast(S.rtl ? 'סוף הספר' : 'End of the book');
   }
   function prev() {
@@ -1297,11 +1329,15 @@
     $('menu').hidden = false; $('scrim').hidden = false;
     $('m-he').textContent = inReader ? (S.data.heTitle || '') : 'הגדרות קריאה';
     $('m-en').textContent = inReader ? (S.data.title || '') : 'Reading settings';
-    if (inReader) {
+    const mk = !!(inReader && S.data.mikra);
+    document.body.classList.toggle('is-mikra', mk);
+    $('m-sef').hidden = mk;
+    $('m-about').hidden = mk || !(S.data && S.data.title);
+    if (mk) renderMikraMenu();
+    if (inReader && !mk) {
       renderCommMenu();
       $('m-about').href = bookHash(S.data.title);
       $('m-sef').href = sefariaUrl(S.ref || S.data.ref);
-      $('m-about').hidden = !S.data.title;
       $('m-goto').hidden = !S.sections.length;
       if (S.cur >= 0) $('m-sec').value = String(S.cur);
     }
@@ -1357,7 +1393,9 @@
     $('p-comm-wrap').hidden = !chosen.length;
     $('p-comm').checked = P.comm;
     $('p-comm-names').textContent = chosen.length ? `(${chosen.join(', ')})` : '';
-    $('p-cols').closest('.opt').hidden = SET.lang === 'both';
+    const mk = !!(S.data && S.data.mikra);
+    $('p-count').closest('.opt').hidden = mk;
+    $('p-cols').closest('.opt').hidden = SET.lang === 'both' || mk;
   }
   function openPrint() {
     closeMenu();
@@ -1375,6 +1413,11 @@
   $('p-comm').onchange = e => { SET.print.comm = e.target.checked; writeJSON(KEY_SET, SET); };
 
   function printSection(data, comm) {
+    if (data.mikra) {
+      const sec = h('section', { class: 'p-sec trop', dir: 'rtl' }, h('h2', { class: 'sec', dir: 'rtl' }, data.heRef));
+      mikraRows(data.mikra).forEach(r => sec.append(rowEl(r)));
+      return { sec, trop: true, rtl: true };
+    }
     const en = data.en, he = data.he.map(prepHe);
     let mode = SET.lang;
     const hasEn = en.some(Boolean), hasHe = he.some(Boolean);
@@ -1408,12 +1451,13 @@
   }
   function buildPrint(list, comms) {
     const P = SET.print;
-    const both = SET.lang === 'both';
+    const mk = !!list[0].mikra;
+    const both = SET.lang === 'both' || (mk && SET.shn.fmt === 'side');
     const parts = list.map((d, k) => printSection(d, comms[k]));
     const rtl = parts.length ? parts[0].rtl : true;
     const first = list[0], last = list[list.length - 1];
     const range = list.length > 1 ? `${rtl ? first.heRef : first.ref} – ${rtl ? last.heRef : last.ref}` : (rtl ? first.heRef : first.ref);
-    const flowEl = h('div', { class: 'p-flow' + (both ? ' p-both' : (P.cols === '2' ? ' cols2' : '')), dir: rtl ? 'rtl' : 'ltr' }, parts.map(p => p.sec));
+    const flowEl = h('div', { class: 'p-flow' + (both ? ' p-both' : (mk || P.cols === '2' ? ' cols2' : '')) + (mk && SET.shn.fmt !== 'side' ? ' mk-solo' : ''), dir: rtl ? 'rtl' : 'ltr' }, parts.map(p => p.sec));
     flowEl.classList.toggle('nonums', !SET.nums);
     $('print').replaceChildren(
       h('h1', { class: 'p-title', dir: rtl ? 'rtl' : 'ltr' }, rtl ? (first.heTitle || first.title) : first.title,
@@ -1444,7 +1488,7 @@
     const status = $('p-status');
     try {
       let d = S.data;
-      for (let k = 0; k < P.count && d.next; k++) {
+      for (let k = 0; k < (S.data.mikra ? 0 : P.count) && d.next; k++) {
         status.textContent = `Getting ${k + 2} of ${P.count + 1}…`;
         d = await getText(d.next); list.push(d);
       }
@@ -1597,6 +1641,280 @@
   $('m-margin').addEventListener('input', onRange('margin', Number));
   $('m-nums').onchange = e => { SET.nums = e.target.checked; applySettings(); relayout(); };
 
+  // ================= Shnayim Mikra =================
+  // The parsha in seven daily portions (the aliyot, Sunday to Shabbat), each shown with its
+  // Targum and/or Rashi so the Hebrew can be read twice and the Targum once.
+  const DAY_LET = ['א׳', 'ב׳', 'ג׳', 'ד׳', 'ה׳', 'ו׳', 'שבת'];
+  const ALIYAH_HE = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שביעי'];
+  const dayLabel = d => (d === 6 ? 'שבת' : 'יום ' + DAY_LET[d]);
+  const slug = t => String(t).replace(/[^A-Za-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'parsha';
+  const mkRef = (key, day) => `~m/${key}/${day}`;
+  function parseRange(ref) {
+    const m = String(ref).match(/^(.+?) (\d+):(\d+)(?:\s*-\s*(?:(\d+):)?(\d+))?$/);
+    if (!m) return null;
+    const c1 = +m[2], v1 = +m[3];
+    return { book: m[1], c1, v1, c2: m[4] ? +m[4] : c1, v2: m[5] ? +m[5] : v1 };
+  }
+  function rangeLabel(ref) {
+    const R = parseRange(ref);
+    return R ? `${R.c1}:${R.v1}–${R.c2 !== R.c1 ? R.c2 + ':' : ''}${R.v2}` : ref;
+  }
+  const doneArr = key => { const a = SET.shn.done[key]; return Array.isArray(a) ? a : (SET.shn.done[key] = [0, 0, 0, 0, 0, 0, 0]); };
+  function setDone(key, day, v) {
+    doneArr(key)[day] = v ? 1 : 0;
+    const keys = Object.keys(SET.shn.done);
+    if (keys.length > 8) delete SET.shn.done[keys[0]];
+    writeJSON(KEY_SET, SET);
+  }
+
+  async function splitEven(ref) {
+    const R = parseRange(ref);
+    if (!R) return [ref];
+    const vs = [];
+    for (let c = R.c1; c <= R.c2; c++) {
+      const ch = await getText(`${R.book} ${c}`);
+      const lo = c === R.c1 ? R.v1 : 1, hi = c === R.c2 ? R.v2 : ch.he.length;
+      for (let v = lo; v <= hi; v++) vs.push([c, v]);
+    }
+    const out = [];
+    for (let k = 0; k < 7; k++) {
+      const a = vs[Math.floor(k * vs.length / 7)], b = vs[Math.floor((k + 1) * vs.length / 7) - 1];
+      if (a && b) out.push(`${R.book} ${a[0]}:${a[1]}-${b[0]}:${b[1]}`);
+    }
+    return out;
+  }
+  // This week's (or last week's) parsha with its seven aliyot.
+  const getParsha = (week = SET.shn.week) => once(`p:${week}:${diasporaFlag()}`, async () => {
+    const items = await getCalendar(week === 'last' ? -7 : 0);
+    const it = items.find(i => /parash/i.test((i.title && i.title.en) || ''));
+    if (!it) return null;
+    const en = (it.displayValue && it.displayValue.en) || '', he = (it.displayValue && it.displayValue.he) || '';
+    let aliyot = it.extraDetails && Array.isArray(it.extraDetails.aliyot) ? it.extraDetails.aliyot.filter(a => typeof a === 'string' && parseRange(a)) : [];
+    let approx = false;
+    if (aliyot.length !== 7) { aliyot = await splitEven(it.ref); approx = true; }
+    return { key: slug(en), en, he, ref: it.ref, heRef: it.heRef || '', aliyot, approx };
+  });
+
+  // Rashi and Onkelos for every pasuk of one chapter: Map(verse index -> {rashi: [{ref, he}], onk}).
+  const firstAnchor = l => {
+    const ex = Array.isArray(l.anchorRefExpanded) && l.anchorRefExpanded.length ? l.anchorRefExpanded[0] : l.anchorRef;
+    const m = String(ex || '').match(/:(\d+)(?:-\d+)?$/);
+    return m ? Number(m[1]) - 1 : null;
+  };
+  const sideTexts = chRef => once('mk:' + chRef, async () => {
+    const links = (await getLinks(chRef)) || [];
+    const wanted = [], seen = new Set();
+    (Array.isArray(links) ? links : []).forEach(l => {
+      const idx = l.index_title || '', ct = (l.collectiveTitle && l.collectiveTitle.en) || '';
+      const isR = l.category === 'Commentary' && (ct === 'Rashi' || /^Rashi on /i.test(idx));
+      const isO = l.category === 'Targum' && /onkelos/i.test(idx + ' ' + ct);
+      const i = firstAnchor(l);
+      if ((!isR && !isO) || i == null || !l.ref || seen.has(l.ref)) return;
+      const m = String(l.ref).match(/^(.+) (\d+[ab]?(?::\d+(?:-\d+)?)*)$/);
+      if (!m) return;
+      seen.add(l.ref);
+      const parts = m[2].split(':');
+      wanted.push({ l, kind: isR ? 'r' : 'o', i, unit: m[1] + ' ' + parts[0], rest: parts.slice(1) });
+    });
+    const units = new Map();
+    wanted.forEach(w => { if (!units.has(w.unit)) units.set(w.unit, getText(w.unit).catch(() => null)); });
+    const texts = new Map();
+    await Promise.all([...units].map(async ([u, p]) => texts.set(u, await p)));
+    const out = new Map();
+    wanted.forEach(w => {
+      const t = texts.get(w.unit);
+      if (!t) return;
+      const he = pickAt(t.heRaw, w.rest).filter(Boolean).join(' ');
+      if (!he) return;
+      const e = out.get(w.i) || { rashi: [], onk: '' };
+      if (w.kind === 'r') e.rashi.push({ ref: w.l.ref, he }); else if (!e.onk) e.onk = he;
+      out.set(w.i, e);
+    });
+    out.forEach(e => e.rashi.sort((a, b) => cmpNums((a.ref.match(/\d+/g) || []).map(Number), (b.ref.match(/\d+/g) || []).map(Number))));
+    return out;
+  });
+  // The pesukim of one day's portion, each with its Rashi and Onkelos.
+  async function buildMikraData(aliyahRef) {
+    const R = parseRange(aliyahRef);
+    if (!R) throw new ApiError('bad_shape');
+    const verses = [];
+    for (let c = R.c1; c <= R.c2; c++) {
+      const chRef = `${R.book} ${c}`;
+      const [ch, side] = await Promise.all([getText(chRef), sideTexts(chRef).catch(() => new Map())]);
+      const lo = c === R.c1 ? R.v1 : 1, hi = c === R.c2 ? R.v2 : ch.he.length;
+      for (let v = lo; v <= hi; v++) {
+        const s = side.get(v - 1) || { rashi: [], onk: '' };
+        verses.push({ c, v, he: ch.he[v - 1] || '', rashi: s.rashi, onk: s.onk });
+      }
+    }
+    return verses;
+  }
+
+  // The rows of one day, laid out according to the chosen format.
+  function mikraRows(M) {
+    const O = SET.shn, rows = [];
+    const hp = v => cleanHtml(prepHe(v.he));
+    const pasuk = v => O.twice ? `${hp(v)}<span class="again">${hp(v)}</span>` : hp(v);
+    const rashi = v => v.rashi.map(c => cleanHtml(prepHe(c.he))).join(' ');
+    const onk = v => (v.onk ? `<span class="onk-t">${cleanHtml(prepHe(v.onk))}</span>` : '');
+    const cite = t => `<cite>${t}</cite> `;
+    let idx = 0, lastC = null;
+    const chapter = c => { if (c !== lastC) { rows.push({ head: true, he: `פרק ${gem(c)}`, en: '', i: null }); lastC = c; } };
+    if (O.fmt === 'separate') {
+      M.verses.forEach(v => { chapter(v.c); rows.push({ he: pasuk(v), en: '', num: gem(v.v, false), i: idx++ }); });
+      const withT = M.verses.filter(v => v.onk);
+      if (withT.length) {
+        rows.push({ head: true, he: 'תרגום אונקלוס', en: '', i: null });
+        withT.forEach(v => rows.push({ he: `<span class="tg-plain">${cleanHtml(prepHe(v.onk))}</span>`, en: '', num: gem(v.v, false), i: idx++ }));
+      }
+      return rows;
+    }
+    M.verses.forEach(v => {
+      chapter(v.c);
+      const num = gem(v.v, false);
+      if (O.fmt === 'targum') {
+        rows.push({ he: pasuk(v) + (v.onk ? `<span class="tg">${cleanHtml(prepHe(v.onk))}</span>` : ''), en: '', num, i: idx++ });
+      } else if (O.fmt === 'targum-rashi') {
+        rows.push({ he: pasuk(v) + (v.onk ? `<span class="tg">${cleanHtml(prepHe(v.onk))}</span>` : '') + (v.rashi.length ? `<span class="rs">${rashi(v)}</span>` : ''), en: '', num, i: idx++ });
+      } else {
+        const r = v.rashi.length ? rashi(v) : '', o = onk(v);
+        let left = '';
+        if (O.left === 'onk') left = o;
+        else if (O.left === 'rashi') left = r;
+        else if (O.left === 'both') left = (o ? cite('אונקלוס') + o : '') + (r ? (o ? '<br>' : '') + cite('רש״י') + r : '');
+        else left = r || (o ? cite('אונקלוס') + o : '');
+        rows.push({ he: pasuk(v), en: left, lhe: true, num, i: idx++ });
+      }
+    });
+    return rows;
+  }
+
+  async function openMikra(ref, at = 0) {
+    const m = ref.match(/^~m\/(.+)\/(\d)$/);
+    const token = ++S.loadToken;
+    setMode('reader');
+    $('st-page').textContent = '…';
+    if (!m) { S.loading = false; location.replace('#/shnayim'); return; }
+    if (!S.data) showMsg('Opening the reading…');
+    S.loading = true;
+    const fail = e => { S.loading = false; showError(e, () => openMikra(ref, at), 'this reading'); };
+    let P;
+    try {
+      P = await getParsha(SET.shn.week);
+      if (P && P.key !== m[1]) {
+        const otherWeek = SET.shn.week === 'last' ? 'this' : 'last';
+        const other = await getParsha(otherWeek);
+        if (other && other.key === m[1]) { SET.shn.week = otherWeek; applySettings(); P = other; } else P = null;
+      }
+    } catch (e) { if (token === S.loadToken) fail(e); return; }
+    if (token !== S.loadToken) return;
+    if (!P) { S.loading = false; location.replace('#/shnayim'); return; }
+    const day = Math.min(P.aliyot.length - 1, Math.max(0, Number(m[2])));
+    let verses;
+    try { verses = await buildMikraData(P.aliyot[day]); }
+    catch (e) { if (token === S.loadToken) fail(e); return; }
+    if (token !== S.loadToken) return;
+    S.data = { ref, heRef: `${P.he || P.en} · ${dayLabel(day)}`, sectionRef: ref, title: 'Shnayim Mikra', heTitle: 'שניים מקרא', he: [], en: [], next: null, prev: null,
+      mikra: { key: P.key, day, parsha: P, range: P.aliyot[day], verses } };
+    S.ref = ref; S.sections = []; S.shapeFor = null; S.cur = -1; S.commAvail = null; S.comm = null;
+    document.title = `${P.en} · Shnayim Mikra`;
+    document.body.classList.add('is-mikra');
+    hideMsg();
+    render();
+    await waitFonts();
+    if (token !== S.loadToken) return;
+    layout();
+    S.page = Math.min(S.pages - 1, Math.floor((at || 0) * S.pages + 0.0001));
+    show(false);
+    S.loading = false;
+    // Save the rest of the week for offline in the background.
+    P.aliyot.forEach((a, d) => { if (d !== day) setTimeout(() => buildMikraData(a).catch(() => {}), 1500 + d * 400); });
+  }
+
+  // Options shared by the planner page and the reader menu.
+  function shnOptionsEl(after) {
+    const O = SET.shn;
+    const seg = (label, key, items) => {
+      const g = h('div', { class: 'seg-group' });
+      items.forEach(([v, t]) => g.append(h('button', { type: 'button', class: 'seg-btn', 'aria-pressed': String(O[key] === v), onclick: () => { O[key] = v; applySettings(); after(key); } }, t)));
+      return h('div', { class: 'opt' }, h('span', { class: 'lbl' }, label), g);
+    };
+    const sel = (label, key, items) => {
+      const s = h('select', { 'aria-label': label }, items.map(([v, t]) => h('option', { value: v }, t)));
+      s.value = O[key];
+      s.onchange = () => { O[key] = s.value; applySettings(); after(key); };
+      return h('div', { class: 'opt' }, h('label', { class: 'lbl' }, label), s);
+    };
+    const rashiFont = h('div', { class: 'opt' }, h('span', { class: 'lbl' }, 'Rashi font'),
+      h('div', { class: 'seg-group' }, [['rashi', 'Rashi script'], ['same', 'Regular']].map(([v, t]) =>
+        h('button', { type: 'button', class: 'seg-btn', 'aria-pressed': String(SET.commFont === v), onclick: () => { SET.commFont = v; applySettings(); after('font'); } }, t))));
+    return h('div', { class: 'opts mk-opts' },
+      seg('Parsha', 'week', [['this', 'This week'], ['last', 'Last week']]),
+      seg('Location', 'loc', [['auto', 'Auto'], ['diaspora', "Chutz La'aretz"], ['israel', 'Eretz Yisrael']]),
+      sel('Text format', 'fmt', [['side', 'Chumash | Rashi (or Targum)'], ['targum', 'Chumash and Targum'], ['targum-rashi', 'Chumash, Targum and Rashi'], ['separate', 'Chumash, then Targum']]),
+      O.fmt === 'side' ? sel('Left column', 'left', [['rashi-onk', 'Rashi, or Targum if none'], ['onk', 'Targum Onkelos'], ['rashi', 'Rashi'], ['both', 'Targum and Rashi']]) : null,
+      seg('Read each pasuk', 'twice', [[false, 'Once'], [true, 'Twice']]),
+      O.fmt !== 'targum' && O.fmt !== 'separate' ? rashiFont : null);
+  }
+
+  // ---- The week planner page
+  async function renderShnayim() {
+    const tok = ++viewToken;
+    setMode('lib');
+    document.title = 'Shnayim Mikra · Sefer Reader';
+    const body = h('div', null, loadingEl("Finding this week's parsha…"));
+    setLib(masthead(), crumbs([], 'Shnayim Mikra'), body, foot());
+    window.scrollTo(0, 0);
+    let P;
+    try { P = await getParsha(); }
+    catch (e) { if (tok === viewToken) body.replaceChildren(errorEl(e, renderShnayim)); return; }
+    if (tok !== viewToken) return;
+    if (!P) { body.replaceChildren(h('p', { class: 'res-status' }, "Sefaria didn't list a parsha for this week.")); return; }
+    const today = new Date().getDay(), done = doneArr(P.key);
+    const days = h('div', { class: 'mk-days' }, P.aliyot.map((a, d) => h('a', { class: 'mk-day' + (d === today && SET.shn.week === 'this' ? ' today' : '') + (done[d] ? ' done' : ''), href: refHash(mkRef(P.key, d)) },
+      h('span', { class: 'd-he', lang: 'he' }, dayLabel(d)), h('span', { class: 'd-al', lang: 'he' }, ALIYAH_HE[d] || ''),
+      h('span', { class: 'd-rng' }, rangeLabel(a)), h('span', { class: 'd-ck', 'aria-hidden': 'true' }, done[d] ? '✓' : ''))));
+    const status = h('span', { class: 'off-status' });
+    const dl = h('button', { class: 'btn' }, 'Save the week for offline');
+    dl.onclick = async () => {
+      dl.disabled = true; let n = 0;
+      status.textContent = `Saving 0 of ${P.aliyot.length}…`;
+      for (const a of P.aliyot) { try { await buildMikraData(a); } catch {} status.textContent = `Saving ${++n} of ${P.aliyot.length}…`; }
+      status.textContent = '✓ The week is saved for offline reading'; dl.disabled = false;
+    };
+    const start = Math.min(today, P.aliyot.length - 1);
+    body.replaceChildren(
+      h('div', { class: 'page-head', style: '--c:#3f6fa3' },
+        h('div', { class: 'names' }, h('h1', null, 'Shnayim Mikra'), h('span', { class: 'he-name', lang: 'he' }, 'שניים מקרא')),
+        h('p', { class: 'desc' }, h('span', { lang: 'he', dir: 'rtl', class: 'mk-parsha' }, `פרשת ${P.he || P.en}`), ` · ${P.en} · ${P.ref}`),
+        P.approx ? h('p', { class: 'meta' }, "Sefaria didn't list the aliyot, so the parsha is divided into seven equal parts.") : null,
+        h('div', { class: 'actions' },
+          h('a', { class: 'btn primary', href: refHash(mkRef(P.key, start)) }, 'Read ', h('span', { lang: 'he', dir: 'rtl' }, dayLabel(start))),
+          dl, status)),
+      h('section', { class: 'lib-section' }, h('h2', null, 'The week'), days),
+      h('section', { class: 'lib-section' }, h('h2', null, 'Options'), shnOptionsEl(k => { if (k === 'font') return; renderShnayim(); })));
+  }
+
+  // ---- Reader menu panel
+  function renderMikraMenu() {
+    const M = S.data && S.data.mikra;
+    if (!M) return;
+    const done = doneArr(M.key);
+    $('mk-days').replaceChildren(...M.parsha.aliyot.map((a, d) =>
+      h('button', { type: 'button', class: 'chip-btn', 'aria-pressed': String(d === M.day), onclick: () => { closeMenu(); location.hash = refHash(mkRef(M.key, d)); } },
+        h('span', { class: 'ch-he', lang: 'he' }, dayLabel(d)), h('span', { class: 'ch-n' }, done[d] ? '✓' : ''))));
+    $('mk-opts').replaceChildren(shnOptionsEl(async k => {
+      if (k === 'week' || k === 'loc') {
+        try { const P = await getParsha(); closeMenu(); location.hash = refHash(mkRef(P.key, Math.min(M.day, P.aliyot.length - 1))); }
+        catch { toast("Couldn't load that parsha."); }
+      } else { rerender(); renderMikraMenu(); }
+    }));
+    $('mk-done').textContent = done[M.day] ? 'Done ✓ (undo)' : 'Mark day done';
+  }
+  $('mk-done').onclick = () => { const M = S.data.mikra; setDone(M.key, M.day, !doneArr(M.key)[M.day]); renderMikraMenu(); };
+  $('mk-smaller').onclick = () => { SET.size = Math.max(14, SET.size - 2); applySettings(); relayout(); };
+  $('mk-bigger').onclick = () => { SET.size = Math.min(56, SET.size + 2); applySettings(); relayout(); };
+
   // ================= Router =================
   function route() {
     closeMenu();
@@ -1604,6 +1922,7 @@
     let hsh;
     try { hsh = decodeURIComponent(raw); } catch { hsh = raw; }
     if (!hsh || hsh === '/') return renderHome();
+    if (hsh === '/shnayim') return renderShnayim();
     if (/^\/s(\?|$)/.test(raw)) return renderSearch(new URLSearchParams(raw.includes('?') ? raw.slice(raw.indexOf('?') + 1) : ''));
     if (hsh.startsWith('/c/')) return renderCategory(raw.slice(3).split('/').map(p => { try { return decodeURIComponent(p); } catch { return p; } }));
     if (hsh.startsWith('/b/')) return renderBook(hsh.slice(3));
