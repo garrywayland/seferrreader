@@ -18,7 +18,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="preconnect" href="https://www.sefaria.org" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Frank+Ruhl+Libre:wght@400;500;700&family=Crimson+Pro:ital,wght@0,400;0,600;1,400&display=swap">
-<link rel="stylesheet" href="styles.css?v=7">
+<link rel="stylesheet" href="styles.css?v=8">
 </head>
 <body class="in-lib">
 
@@ -32,6 +32,7 @@
 <div id="bar" hidden></div>
 <div id="status" hidden><span class="t" id="st-title"></span><span id="st-page"></span></div>
 <div id="toast"></div>
+<button id="mk-quick" class="mk-quick" type="button" lang="he"></button>
 
 <div id="msg" hidden>
   <div class="box">
@@ -63,6 +64,7 @@
 
   <div class="mikra-only" id="m-mikra">
     <span class="lbl">Shnayim Mikra</span>
+    <label class="toggle"><input type="checkbox" id="mk-only"> Chumash only <span class="help">(hide Rashi and Targum)</span></label>
     <div class="chips-row" id="mk-days"></div>
     <div id="mk-opts"></div>
     <div class="row app-row">
@@ -287,6 +289,6 @@
 <div id="print" aria-hidden="true"></div>
 <style id="pstyle"></style>
 
-<script src="app.js?v=7"></script>
+<script src="app.js?v=8"></script>
 </body>
 </html>

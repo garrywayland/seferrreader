@@ -365,3 +365,9 @@ body:not(.is-mikra) .mikra-only { display: none; }
   .tg, .tg-plain { color: #1b3a73; }
   .brow.mk-head { color: #000; }
 }
+
+/* Quick Chumash-only toggle, shown while reading Shnayim Mikra */
+.mk-quick { display: none; position: fixed; z-index: 15; top: calc(env(safe-area-inset-top, 0px) + 6px); inset-inline-start: max(8px, env(safe-area-inset-left, 0px)); font-family: var(--he); font-size: 13px; padding: .25em .8em; border: 1px solid var(--rule); border-radius: 999px; background: var(--panel); color: var(--muted); cursor: pointer; opacity: .85; }
+.mk-quick[aria-pressed="true"] { color: var(--accent); border-color: var(--accent); }
+body.is-mikra.in-reader .mk-quick { display: block; }
+@media print { .mk-quick { display: none !important; } }

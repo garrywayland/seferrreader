@@ -28,7 +28,7 @@
   const DEFAULTS = { lang: 'he', theme: 'auto', heFont: 'Frank Ruhl Libre', enFont: 'Crimson Pro', size: 21, lh: 1.78, margin: 2, cols: 'auto', nums: true, vowels: 'all', align: 'auto', ahead: 10, yomiHidden: [], comm: {}, commFont: 'rashi', select: !(window.matchMedia && matchMedia('(pointer: coarse)').matches), tapSide: 'standard', tapZone: 35, ui: 'normal', wake: true, remTime: '07:30', print: { count: 0, paper: 'A4', cols: '2', size: 'M', margin: 'normal', comm: true } };
   const SET = Object.assign({}, DEFAULTS, readJSON(KEY_SET, {}));
 
-  SET.shn = Object.assign({ fmt: 'side', left: 'rashi-onk', twice: false, week: 'this', loc: 'auto', done: {} }, SET.shn);
+  SET.shn = Object.assign({ fmt: 'side', left: 'rashi-onk', twice: false, only: false, week: 'this', loc: 'auto', done: {} }, SET.shn);
   function readJSON(k, fallback) { try { const v = JSON.parse(localStorage.getItem(k)); return v == null ? fallback : v; } catch { return fallback; } }
   function writeJSON(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} }
 
@@ -924,7 +924,8 @@
       S.rtl = true; S.both = true;
       flow.replaceChildren(); flow.dir = 'rtl';
       flow.classList.toggle('nonums', !SET.nums);
-      flow.classList.toggle('mk-solo', SET.shn.fmt !== 'side');
+      flow.classList.toggle('mk-solo', mkFmt() !== 'side');
+      updateQuick();
       const trop = !TROP_FONTS.has(SET.heFont) && TROP_RE.test(M.verses.map(v => v.he).join(''));
       flow.classList.toggle('trop', trop);
       S.fontWait = Promise.all([trop ? ensureFont('Noto Serif Hebrew') : null, SET.commFont === 'rashi' ? ensureFont('Noto Rashi Hebrew') : null]);
@@ -1289,6 +1290,7 @@
     else if (k === 'ArrowRight') { e.preventDefault(); S.rtl ? prev() : next(); }
     else if (k === ' ' || k === 'PageDown' || k === 'ArrowDown') { e.preventDefault(); e.shiftKey ? prev() : next(); }
     else if (k === 'PageUp' || k === 'ArrowUp') { e.preventDefault(); prev(); }
+    else if ((k === 'c' || k === 'C') && S.data && S.data.mikra) { e.preventDefault(); toggleOnly(); }
     else if (k === 'm' || k === 'Escape' || k === 'Enter') { e.preventDefault(); openMenu(); }
   });
   let rz;
@@ -1452,12 +1454,12 @@
   function buildPrint(list, comms) {
     const P = SET.print;
     const mk = !!list[0].mikra;
-    const both = SET.lang === 'both' || (mk && SET.shn.fmt === 'side');
+    const both = SET.lang === 'both' || (mk && mkFmt() === 'side');
     const parts = list.map((d, k) => printSection(d, comms[k]));
     const rtl = parts.length ? parts[0].rtl : true;
     const first = list[0], last = list[list.length - 1];
     const range = list.length > 1 ? `${rtl ? first.heRef : first.ref} – ${rtl ? last.heRef : last.ref}` : (rtl ? first.heRef : first.ref);
-    const flowEl = h('div', { class: 'p-flow' + (both ? ' p-both' : (mk || P.cols === '2' ? ' cols2' : '')) + (mk && SET.shn.fmt !== 'side' ? ' mk-solo' : ''), dir: rtl ? 'rtl' : 'ltr' }, parts.map(p => p.sec));
+    const flowEl = h('div', { class: 'p-flow' + (both ? ' p-both' : (mk || P.cols === '2' ? ' cols2' : '')) + (mk && mkFmt() !== 'side' ? ' mk-solo' : ''), dir: rtl ? 'rtl' : 'ltr' }, parts.map(p => p.sec));
     flowEl.classList.toggle('nonums', !SET.nums);
     $('print').replaceChildren(
       h('h1', { class: 'p-title', dir: rtl ? 'rtl' : 'ltr' }, rtl ? (first.heTitle || first.title) : first.title,
@@ -1751,8 +1753,9 @@
   }
 
   // The rows of one day, laid out according to the chosen format.
+  const mkFmt = () => (SET.shn.only ? 'chumash' : SET.shn.fmt);
   function mikraRows(M) {
-    const O = SET.shn, rows = [];
+    const O = SET.shn, rows = [], fmt = mkFmt();
     const hp = v => cleanHtml(prepHe(v.he));
     const pasuk = v => O.twice ? `${hp(v)}<span class="again">${hp(v)}</span>` : hp(v);
     const rashi = v => v.rashi.map(c => cleanHtml(prepHe(c.he))).join(' ');
@@ -1760,7 +1763,7 @@
     const cite = t => `<cite>${t}</cite> `;
     let idx = 0, lastC = null;
     const chapter = c => { if (c !== lastC) { rows.push({ head: true, he: `פרק ${gem(c)}`, en: '', i: null }); lastC = c; } };
-    if (O.fmt === 'separate') {
+    if (fmt === 'separate') {
       M.verses.forEach(v => { chapter(v.c); rows.push({ he: pasuk(v), en: '', num: gem(v.v, false), i: idx++ }); });
       const withT = M.verses.filter(v => v.onk);
       if (withT.length) {
@@ -1772,9 +1775,11 @@
     M.verses.forEach(v => {
       chapter(v.c);
       const num = gem(v.v, false);
-      if (O.fmt === 'targum') {
+      if (fmt === 'chumash') {
+        rows.push({ he: pasuk(v), en: '', num, i: idx++ });
+      } else if (fmt === 'targum') {
         rows.push({ he: pasuk(v) + (v.onk ? `<span class="tg">${cleanHtml(prepHe(v.onk))}</span>` : ''), en: '', num, i: idx++ });
-      } else if (O.fmt === 'targum-rashi') {
+      } else if (fmt === 'targum-rashi') {
         rows.push({ he: pasuk(v) + (v.onk ? `<span class="tg">${cleanHtml(prepHe(v.onk))}</span>` : '') + (v.rashi.length ? `<span class="rs">${rashi(v)}</span>` : ''), en: '', num, i: idx++ });
       } else {
         const r = v.rashi.length ? rashi(v) : '', o = onk(v);
@@ -1910,7 +1915,22 @@
       } else { rerender(); renderMikraMenu(); }
     }));
     $('mk-done').textContent = done[M.day] ? 'Done ✓ (undo)' : 'Mark day done';
+    $('mk-only').checked = !!SET.shn.only;
   }
+  // Quick toggle: just the Chumash, or Chumash with Rashi / Targum.
+  function updateQuick() {
+    const b = $('mk-quick');
+    b.textContent = SET.shn.only ? 'הצג פירוש' : 'חומש בלבד';
+    b.setAttribute('aria-pressed', String(!!SET.shn.only));
+    b.title = SET.shn.only ? 'Show Rashi / Targum again (C)' : 'Show only the Chumash (C)';
+  }
+  function toggleOnly() {
+    SET.shn.only = !SET.shn.only;
+    applySettings(); rerender(); updateQuick();
+    if (!$('menu').hidden) renderMikraMenu();
+  }
+  $('mk-quick').onclick = toggleOnly;
+  $('mk-only').onchange = toggleOnly;
   $('mk-done').onclick = () => { const M = S.data.mikra; setDone(M.key, M.day, !doneArr(M.key)[M.day]); renderMikraMenu(); };
   $('mk-smaller').onclick = () => { SET.size = Math.max(14, SET.size - 2); applySettings(); relayout(); };
   $('mk-bigger').onclick = () => { SET.size = Math.min(56, SET.size + 2); applySettings(); relayout(); };
