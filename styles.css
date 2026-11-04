@@ -371,3 +371,10 @@ body:not(.is-mikra) .mikra-only { display: none; }
 .mk-quick[aria-pressed="true"] { color: var(--accent); border-color: var(--accent); }
 body.is-mikra.in-reader .mk-quick { display: block; }
 @media print { .mk-quick { display: none !important; } }
+
+/* Previous / next day while reading Shnayim Mikra */
+.mk-nav { display: none; position: fixed; z-index: 15; bottom: calc(env(safe-area-inset-bottom, 0px) + 4px); font-family: var(--he); font-size: 13px; padding: .25em .8em; border: 1px solid var(--rule); border-radius: 999px; background: var(--panel); color: var(--fg); cursor: pointer; opacity: .9; }
+.mk-nav-next { left: max(8px, env(safe-area-inset-left, 0px)); }
+.mk-nav-prev { right: max(8px, env(safe-area-inset-right, 0px)); }
+body.is-mikra.in-reader .mk-nav { display: block; }
+@media print { .mk-nav { display: none !important; } }

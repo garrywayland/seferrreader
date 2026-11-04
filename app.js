@@ -529,8 +529,8 @@
       if (tok !== viewToken) return;
       const pa = items.find(i => /parash/i.test(i.title.en));
       if (pa && pa.displayValue) {
-        const k = slug(pa.displayValue.en || ''), d = new Date().getDay(), n = doneArr(k).filter(Boolean).length;
-        items = [{ title: { en: 'Shnayim Mikra', he: 'שניים מקרא' }, displayValue: { he: `${pa.displayValue.he || pa.displayValue.en} · ${dayLabel(d)}`, en: `${pa.displayValue.en} · ${n} of 7 days done` }, ref: '', href: '#/shnayim' }, ...items];
+        const k = slug(pa.displayValue.en || ''), n = doneArr(k).filter(Boolean).length;
+        items = [{ title: { en: 'Shnayim Mikra', he: 'שניים מקרא' }, displayValue: { he: pa.displayValue.he || pa.displayValue.en, en: `${pa.displayValue.en} · ${n} of 7 days done` }, ref: '', href: refHash(mkRef(k, 0)) }, ...items];
       }
       const cards = items.map(it => {
         const key = it.title.en;
@@ -925,7 +925,7 @@
       flow.replaceChildren(); flow.dir = 'rtl';
       flow.classList.toggle('nonums', !SET.nums);
       flow.classList.toggle('mk-solo', mkFmt() !== 'side');
-      updateQuick();
+      updateQuick(); updateMkNav();
       const trop = !TROP_FONTS.has(SET.heFont) && TROP_RE.test(M.verses.map(v => v.he).join(''));
       flow.classList.toggle('trop', trop);
       S.fontWait = Promise.all([trop ? ensureFont('Noto Serif Hebrew') : null, SET.commFont === 'rashi' ? ensureFont('Noto Rashi Hebrew') : null]);
@@ -1685,15 +1685,40 @@
     }
     return out;
   }
+  // Sefaria lists the aliyot as, e.g., 7 ranges plus the maftir (which repeats the end of the 7th),
+  // and a double parsha lists both sets. Drop any range inside the one before it, then use the 7
+  // real aliyot as the days, or, if there are more, group neighbouring aliyot (never splitting one).
+  function sevenDays(list) {
+    const at = (c, v) => c * 1000 + v;
+    const rs = (Array.isArray(list) ? list : []).filter(a => typeof a === 'string').map(a => ({ a, R: parseRange(a) })).filter(x => x.R);
+    const out = [];
+    rs.forEach(x => {
+      const p = out[out.length - 1];
+      if (p && at(x.R.c1, x.R.v1) >= at(p.R.c1, p.R.v1) && at(x.R.c2, x.R.v2) <= at(p.R.c2, p.R.v2)) return;
+      out.push(x);
+    });
+    if (out.length < 7) return null;
+    // The breaks must run forward without overlapping; if not, don't trust them.
+    for (let k = 1; k < out.length; k++) if (at(out[k].R.c1, out[k].R.v1) <= at(out[k - 1].R.c2, out[k - 1].R.v2)) return null;
+    if (out.length === 7) return out.map(x => x.a);
+    const days = [], base = Math.floor(out.length / 7), extra = out.length % 7;
+    let i = 0;
+    for (let d = 0; d < 7; d++) {
+      const n = base + (d < extra ? 1 : 0), g = out.slice(i, i + n); i += n;
+      const f = g[0].R, l = g[g.length - 1].R;
+      days.push(`${f.book} ${f.c1}:${f.v1}-${l.c2}:${l.v2}`);
+    }
+    return days;
+  }
   // This week's (or last week's) parsha with its seven aliyot.
   const getParsha = (week = SET.shn.week) => once(`p:${week}:${diasporaFlag()}`, async () => {
     const items = await getCalendar(week === 'last' ? -7 : 0);
     const it = items.find(i => /parash/i.test((i.title && i.title.en) || ''));
     if (!it) return null;
     const en = (it.displayValue && it.displayValue.en) || '', he = (it.displayValue && it.displayValue.he) || '';
-    let aliyot = it.extraDetails && Array.isArray(it.extraDetails.aliyot) ? it.extraDetails.aliyot.filter(a => typeof a === 'string' && parseRange(a)) : [];
+    let aliyot = sevenDays(it.extraDetails && it.extraDetails.aliyot);
     let approx = false;
-    if (aliyot.length !== 7) { aliyot = await splitEven(it.ref); approx = true; }
+    if (!aliyot) { aliyot = await splitEven(it.ref); approx = true; }
     return { key: slug(en), en, he, ref: it.ref, heRef: it.heRef || '', aliyot, approx };
   });
 
@@ -1707,15 +1732,18 @@
     const links = (await getLinks(chRef)) || [];
     const wanted = [], seen = new Set();
     (Array.isArray(links) ? links : []).forEach(l => {
-      const idx = l.index_title || '', ct = (l.collectiveTitle && l.collectiveTitle.en) || '';
-      const isR = l.category === 'Commentary' && (ct === 'Rashi' || /^Rashi on /i.test(idx));
-      const isO = l.category === 'Targum' && /onkelos/i.test(idx + ' ' + ct);
-      const i = firstAnchor(l);
-      if ((!isR && !isO) || i == null || !l.ref || seen.has(l.ref)) return;
-      const m = String(l.ref).match(/^(.+) (\d+[ab]?(?::\d+(?:-\d+)?)*)$/);
+      const idx = l.index_title || '', ct = (l.collectiveTitle && l.collectiveTitle.en) || '', ref = String(l.ref || '');
+      const isR = l.category === 'Commentary' && (/^Rashi on /i.test(ref) || ct === 'Rashi' || /^Rashi on /i.test(idx));
+      const isO = l.category === 'Targum' && (/^Onkelos /i.test(ref) || /onkelos/i.test(idx + ' ' + ct));
+      if ((!isR && !isO) || !ref || seen.has(ref)) return;
+      const m = ref.match(/^(.+) (\d+[ab]?(?::\d+(?:-\d+)?)*)$/);
       if (!m) return;
-      seen.add(l.ref);
       const parts = m[2].split(':');
+      // "Rashi on Genesis 23:1:2" is chapter 23, pasuk 1, comment 2; "Onkelos Genesis 23:1" is pasuk 1.
+      let i = parts.length >= 2 ? Number(parts[1].replace(/-.*/, '')) - 1 : null;
+      if (i == null || isNaN(i)) i = firstAnchor(l);
+      if (i == null || i < 0) return;
+      seen.add(ref);
       wanted.push({ l, kind: isR ? 'r' : 'o', i, unit: m[1] + ' ' + parts[0], rest: parts.slice(1) });
     });
     const units = new Map();
@@ -1887,7 +1915,7 @@
       for (const a of P.aliyot) { try { await buildMikraData(a); } catch {} status.textContent = `Saving ${++n} of ${P.aliyot.length}…`; }
       status.textContent = '✓ The week is saved for offline reading'; dl.disabled = false;
     };
-    const start = Math.min(today, P.aliyot.length - 1);
+    const start = 0;
     body.replaceChildren(
       h('div', { class: 'page-head', style: '--c:#3f6fa3' },
         h('div', { class: 'names' }, h('h1', null, 'Shnayim Mikra'), h('span', { class: 'he-name', lang: 'he' }, 'שניים מקרא')),
@@ -1917,6 +1945,18 @@
     $('mk-done').textContent = done[M.day] ? 'Done ✓ (undo)' : 'Mark day done';
     $('mk-only').checked = !!SET.shn.only;
   }
+  // Previous / next day. Hebrew direction: the next day is on the left, like turning a page.
+  function updateMkNav() {
+    const M = S.data && S.data.mikra;
+    if (!M) return;
+    const p = $('mk-prev'), n = $('mk-next');
+    p.hidden = M.day <= 0; n.hidden = M.day >= M.parsha.aliyot.length - 1;
+    p.textContent = `${dayLabel(M.day - 1)} →`;
+    n.textContent = `← ${dayLabel(M.day + 1)}`;
+  }
+  const goDay = delta => { const M = S.data && S.data.mikra; if (M) location.hash = refHash(mkRef(M.key, M.day + delta)); };
+  $('mk-prev').onclick = () => goDay(-1);
+  $('mk-next').onclick = () => goDay(1);
   // Quick toggle: just the Chumash, or Chumash with Rashi / Targum.
   function updateQuick() {
     const b = $('mk-quick');
