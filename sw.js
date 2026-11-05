@@ -1,9 +1,9 @@
 // Offline support: the app shell, fonts, library metadata and every text you open are kept in the browser.
-const SHELL = 'shell-v9';
+const SHELL = 'shell-v10';
 const TEXTS = 'sefer-texts-v1';
 const META = 'sefer-meta-v1';
 const FONTS = 'sefer-fonts-v1';
-const SHELL_FILES = ['./', 'index.html', 'styles.css', 'app.js', 'manifest.webmanifest', 'icon.svg', 'icon-192.png', 'apple-touch-icon.png'];
+const SHELL_FILES = ['./', 'index.html', 'styles.css', 'app.js', 'manifest.webmanifest', 'icon.svg', 'icon-192.png', 'apple-touch-icon.png', 'fonts/Mekorot-Regular.woff2', 'fonts/Mekorot-Bold.woff2'];
 
 self.addEventListener('install', e => {
   e.waitUntil(caches.open(SHELL).then(c => c.addAll(SHELL_FILES)).then(() => self.skipWaiting()));

@@ -14,7 +14,8 @@
     ['Frank Ruhl Libre', 'Frank Ruhl (classic sefer)'],
     ['Noto Serif Hebrew', 'Noto Serif (shows trop)'],
     ['David Libre', 'David'],
-    ['Noto Rashi Hebrew', 'Rashi script'],
+    ['Mekorot', 'Classic Rashi script (Mekorot)'],
+    ['Noto Rashi Hebrew', 'Modern Rashi script'],
     ['Heebo', 'Heebo (sans)'],
   ];
   const EN_FONTS = [
@@ -25,15 +26,26 @@
     ['Inter', 'Inter (sans)'],
   ];
   const MARGINS = [0, 12, 32, 56, 88, 128];
-  const DEFAULTS = { lang: 'he', theme: 'auto', heFont: 'Frank Ruhl Libre', enFont: 'Crimson Pro', size: 21, lh: 1.78, margin: 2, cols: 'auto', nums: true, vowels: 'all', align: 'auto', ahead: 10, yomiHidden: [], comm: {}, commFont: 'rashi', select: !(window.matchMedia && matchMedia('(pointer: coarse)').matches), tapSide: 'standard', tapZone: 35, ui: 'normal', wake: true, remTime: '07:30', print: { count: 0, paper: 'A4', cols: '2', size: 'M', margin: 'normal', comm: true } };
+  const DEFAULTS = { lang: 'he', theme: 'auto', heFont: 'Frank Ruhl Libre', enFont: 'Crimson Pro', size: 21, lh: 1.78, margin: 2, cols: 'auto', nums: true, vowels: 'all', align: 'auto', ahead: 10, yomiHidden: [], comm: {}, commFont: 'classic', commVowels: 'off', select: !(window.matchMedia && matchMedia('(pointer: coarse)').matches), tapSide: 'standard', tapZone: 35, ui: 'normal', wake: true, remTime: '07:30', print: { count: 0, paper: 'A4', cols: '2', size: 'M', margin: 'normal', comm: true } };
   const SET = Object.assign({}, DEFAULTS, readJSON(KEY_SET, {}));
 
-  SET.shn = Object.assign({ fmt: 'side', left: 'rashi-onk', twice: false, only: false, week: 'this', loc: 'auto', done: {} }, SET.shn);
+  SET.shn = Object.assign({ fmt: 'side', left: 'rashi-onk', twice: false, only: false, week: 'this', loc: 'auto', done: {}, last: null }, SET.shn);
+  if (SET.commFont === 'rashi') SET.commFont = 'classic';   // the old default (Noto Rashi) is now "modern"
+  // The family used for commentary text, if it isn't the regular font.
+  const rashiFam = () => (SET.commFont === 'classic' ? 'Mekorot' : SET.commFont === 'modern' ? 'Noto Rashi Hebrew' : null);
+  // Printed Rashi has no nikud; Sefaria's Rashi text does. Hidden unless asked for.
+  const NIKUD_RE = /[\u0591-\u05AF\u05B0-\u05BD\u05BF\u05C1\u05C2\u05C4\u05C5\u05C7]/g;
+  const prepComm = t => (t && SET.commVowels !== 'on' ? t.replace(NIKUD_RE, '') : prepHe(t));
+  const prepFor = who => (/onkelos|targum|jonathan|neofiti/i.test((who && who.en) || '') ? prepHe : prepComm);
   function readJSON(k, fallback) { try { const v = JSON.parse(localStorage.getItem(k)); return v == null ? fallback : v; } catch { return fallback; } }
   function writeJSON(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} }
 
   const loadedFonts = new Map([['Frank Ruhl Libre', Promise.resolve()], ['Crimson Pro', Promise.resolve()]]);
   function ensureFont(family) {
+    if (!loadedFonts.has(family) && family === 'Mekorot') {
+      // The classic printed Rashi face is not on Google Fonts, so it is hosted with the site (fonts/).
+      loadedFonts.set(family, Promise.all(['400', '700'].map(w => document.fonts.load(`${w} 16px Mekorot`, 'אב'))).then(() => {}, () => {}));
+    }
     if (!loadedFonts.has(family)) {
       loadedFonts.set(family, new Promise(res => {
         const l = document.createElement('link');
@@ -63,8 +75,8 @@
     st.setProperty('--he', `"${SET.heFont}", "Frank Ruhl Libre", "Noto Serif Hebrew", "Times New Roman", serif`);
     st.setProperty('--en', `"${SET.enFont}", "Crimson Pro", Georgia, "Times New Roman", serif`);
     st.setProperty('--fs', SET.size + 'px');
-    if (SET.commFont === 'rashi') ensureFont('Noto Rashi Hebrew');
-    st.setProperty('--comm-he', SET.commFont === 'rashi' ? '"Noto Rashi Hebrew", var(--he)' : 'var(--he)');
+    if (rashiFam()) ensureFont(rashiFam());
+    st.setProperty('--comm-he', SET.commFont === 'classic' ? '"Mekorot", "Noto Rashi Hebrew", var(--he)' : SET.commFont === 'modern' ? '"Noto Rashi Hebrew", var(--he)' : 'var(--he)');
     st.setProperty('--lh', String(SET.lh));
     st.setProperty('--mx', MARGINS[SET.margin] + 'px');
     st.setProperty('--my', (SET.margin * 6) + 'px');
@@ -530,7 +542,8 @@
       const pa = items.find(i => /parash/i.test(i.title.en));
       if (pa && pa.displayValue) {
         const k = slug(pa.displayValue.en || ''), n = doneArr(k).filter(Boolean).length;
-        items = [{ title: { en: 'Shnayim Mikra', he: 'שניים מקרא' }, displayValue: { he: pa.displayValue.he || pa.displayValue.en, en: `${pa.displayValue.en} · ${n} of 7 days done` }, ref: '', href: refHash(mkRef(k, 0)) }, ...items];
+        const last = SET.shn.last, day = last && last.key === k ? last.day : 0;
+        items = [{ title: { en: 'Shnayim Mikra', he: 'שניים מקרא' }, displayValue: { he: (pa.displayValue.he || pa.displayValue.en) + (day ? ` · ${dayLabel(day)}` : ''), en: `${pa.displayValue.en} · ${n} of 7 days done` }, ref: '', href: refHash(mkRef(k, day)) }, ...items];
       }
       const cards = items.map(it => {
         const key = it.title.en;
@@ -913,7 +926,7 @@
       const first = k === 0 || list[k - 1].who.en !== c.who.en;
       const p = h('p', { class: 'comm ' + (useEn ? 'c-en' : 'c-he'), dir: useEn ? 'ltr' : 'rtl', lang: useEn ? 'en' : 'he' },
         first ? h('cite', null, useEn ? c.who.en : (c.who.he || c.who.en)) : null);
-      p.append(first ? ' ' : '', clean(useEn ? c.en : prepHe(c.he)));
+      p.append(first ? ' ' : '', clean(useEn ? c.en : prepFor(c.who)(c.he)));
       box.append(p);
     });
     return box;
@@ -928,7 +941,7 @@
       updateQuick(); updateMkNav();
       const trop = !TROP_FONTS.has(SET.heFont) && TROP_RE.test(M.verses.map(v => v.he).join(''));
       flow.classList.toggle('trop', trop);
-      S.fontWait = Promise.all([trop ? ensureFont('Noto Serif Hebrew') : null, SET.commFont === 'rashi' ? ensureFont('Noto Rashi Hebrew') : null]);
+      S.fontWait = Promise.all([trop ? ensureFont('Noto Serif Hebrew') : null, rashiFam() ? ensureFont(rashiFam()) : null]);
       S.head = [h('h2', { class: 'sec', dir: 'rtl' }, S.data.heRef)];
       if (M.parsha.approx) S.head.push(h('p', { class: 'note' }, 'מחולק לשבעה חלקים שווים'));
       S.rows = mikraRows(M);
@@ -964,7 +977,7 @@
           const first = k === 0 || list[k - 1].who.en !== c.who.en;
           S.rows.push({
             comm: true,
-            he: c.he ? (first ? `<cite>${esc(c.who.he || c.who.en)}</cite> ` : '') + cleanHtml(prepHe(c.he)) : '',
+            he: c.he ? (first ? `<cite>${esc(c.who.he || c.who.en)}</cite> ` : '') + cleanHtml(prepFor(c.who)(c.he)) : '',
             en: c.en ? (first ? `<cite>${esc(c.who.en)}</cite> ` : '') + cleanHtml(c.en) : '',
             i: null,
           });
@@ -1116,6 +1129,14 @@
     const hsh = refHash(S.ref);
     if (location.hash !== hsh) try { history.replaceState(null, '', hsh); } catch {}
     recordHistory();
+    if (S.data.mikra) saveMikraPos();
+  }
+  // Shnayim Mikra remembers the aliyah (and page) you were on.
+  let mkPosT;
+  function saveMikraPos() {
+    const M = S.data.mikra;
+    SET.shn.last = { key: M.key, day: M.day, frac: S.pages > 1 ? S.page / S.pages : 0 };
+    clearTimeout(mkPosT); mkPosT = setTimeout(() => writeJSON(KEY_SET, SET), 400);
   }
 
   // Open any reference; `at` is a fraction of the section (0 = start) or 'last'.
@@ -1235,7 +1256,7 @@
     if (!S.data || reader.hidden) return;
     const { a, frac } = takeAnchor();
     render(); layout(); place(a, frac); show(false);
-    if (S.fontWait || SET.commFont === 'rashi') relayoutAfterFonts();
+    if (S.fontWait || rashiFam()) relayoutAfterFonts();
   }
   let fontT;
   function relayoutAfterFonts() {
@@ -1318,7 +1339,7 @@
     $('m-lh').value = SET.lh; $('m-lh-v').textContent = Number(SET.lh).toFixed(2);
     $('m-margin').value = SET.margin; $('m-margin-v').textContent = ['None', 'Narrow', 'Normal', 'Wide', 'Wider', 'Widest'][SET.margin];
     $('m-nums').checked = SET.nums;
-    pressGroup('m-vowels', SET.vowels); pressGroup('m-align', SET.align); pressGroup('m-commfont', SET.commFont);
+    pressGroup('m-vowels', SET.vowels); pressGroup('m-align', SET.align); pressGroup('m-commfont', SET.commFont); pressGroup('m-commvowels', SET.commVowels);
     $('m-ahead').value = String(SET.ahead);
     pressGroup('m-tapside', SET.tapSide); pressGroup('m-tapzone', SET.tapZone); pressGroup('m-ui', SET.ui);
     $('m-wake').checked = SET.wake;
@@ -1380,6 +1401,7 @@
   bindGroup('m-vowels', 'vowels', rerender);
   bindGroup('m-align', 'align', relayout);
   bindGroup('m-commfont', 'commFont', relayoutAfterFonts);
+  bindGroup('m-commvowels', 'commVowels', rerender);
 
   // ================= Print =================
   // The text is reflowed for paper (not copied from the screen pages): two columns on A4,
@@ -1437,7 +1459,7 @@
         commOf(comm, data, i).forEach((c, k, list) => {
           const first = k === 0 || list[k - 1].who.en !== c.who.en;
           sec.append(rowEl({ comm: true, i: null,
-            he: c.he ? (first ? `<cite>${esc(c.who.he || c.who.en)}</cite> ` : '') + cleanHtml(prepHe(c.he)) : '',
+            he: c.he ? (first ? `<cite>${esc(c.who.he || c.who.en)}</cite> ` : '') + cleanHtml(prepFor(c.who)(c.he)) : '',
             en: c.en ? (first ? `<cite>${esc(c.who.en)}</cite> ` : '') + cleanHtml(c.en) : '' }));
         });
       }
@@ -1476,7 +1498,7 @@
   async function loadPrintFonts(trop) {
     const fams = [SET.heFont, SET.enFont];
     if (trop) fams.push('Noto Serif Hebrew');
-    if (SET.commFont === 'rashi') fams.push('Noto Rashi Hebrew');
+    if (rashiFam()) fams.push(rashiFam());
     await Promise.all(fams.map(f => ensureFont(f).then(() => Promise.all([
       document.fonts.load(`400 12pt "${f}"`, 'אבג abc'), document.fonts.load(`700 12pt "${f}"`, 'אבג abc')])).catch(() => {})));
   }
@@ -1786,7 +1808,7 @@
     const O = SET.shn, rows = [], fmt = mkFmt();
     const hp = v => cleanHtml(prepHe(v.he));
     const pasuk = v => O.twice ? `${hp(v)}<span class="again">${hp(v)}</span>` : hp(v);
-    const rashi = v => v.rashi.map(c => cleanHtml(prepHe(c.he))).join(' ');
+    const rashi = v => v.rashi.map(c => cleanHtml(prepComm(c.he))).join(' ');
     const onk = v => (v.onk ? `<span class="onk-t">${cleanHtml(prepHe(v.onk))}</span>` : '');
     const cite = t => `<cite>${t}</cite> `;
     let idx = 0, lastC = null;
@@ -1843,6 +1865,8 @@
     if (token !== S.loadToken) return;
     if (!P) { S.loading = false; location.replace('#/shnayim'); return; }
     const day = Math.min(P.aliyot.length - 1, Math.max(0, Number(m[2])));
+    const last = SET.shn.last;
+    if (!at && last && last.key === P.key && last.day === day) at = last.frac || 0;
     let verses;
     try { verses = await buildMikraData(P.aliyot[day]); }
     catch (e) { if (token === S.loadToken) fail(e); return; }
@@ -1878,9 +1902,12 @@
       s.onchange = () => { O[key] = s.value; applySettings(); after(key); };
       return h('div', { class: 'opt' }, h('label', { class: 'lbl' }, label), s);
     };
-    const rashiFont = h('div', { class: 'opt' }, h('span', { class: 'lbl' }, 'Rashi font'),
-      h('div', { class: 'seg-group' }, [['rashi', 'Rashi script'], ['same', 'Regular']].map(([v, t]) =>
-        h('button', { type: 'button', class: 'seg-btn', 'aria-pressed': String(SET.commFont === v), onclick: () => { SET.commFont = v; applySettings(); after('font'); } }, t))));
+    const setGroup = (label, key, items) => h('div', { class: 'opt' }, h('span', { class: 'lbl' }, label),
+      h('div', { class: 'seg-group' }, items.map(([v, t]) =>
+        h('button', { type: 'button', class: 'seg-btn', 'aria-pressed': String(SET[key] === v), onclick: () => { SET[key] = v; applySettings(); after('font'); } }, t))));
+    const rashiFont = h('div', { class: 'mk-rashi-opts' },
+      setGroup('Rashi font', 'commFont', [['classic', 'Classic'], ['modern', 'Modern'], ['same', 'Regular']]),
+      setGroup('Vowels in Rashi', 'commVowels', [['off', 'Off'], ['on', 'On']]));
     return h('div', { class: 'opts mk-opts' },
       seg('Parsha', 'week', [['this', 'This week'], ['last', 'Last week']]),
       seg('Location', 'loc', [['auto', 'Auto'], ['diaspora', "Chutz La'aretz"], ['israel', 'Eretz Yisrael']]),
@@ -1915,14 +1942,14 @@
       for (const a of P.aliyot) { try { await buildMikraData(a); } catch {} status.textContent = `Saving ${++n} of ${P.aliyot.length}…`; }
       status.textContent = '✓ The week is saved for offline reading'; dl.disabled = false;
     };
-    const start = 0;
+    const lastPos = SET.shn.last, start = lastPos && lastPos.key === P.key ? Math.min(lastPos.day, P.aliyot.length - 1) : 0;
     body.replaceChildren(
       h('div', { class: 'page-head', style: '--c:#3f6fa3' },
         h('div', { class: 'names' }, h('h1', null, 'Shnayim Mikra'), h('span', { class: 'he-name', lang: 'he' }, 'שניים מקרא')),
         h('p', { class: 'desc' }, h('span', { lang: 'he', dir: 'rtl', class: 'mk-parsha' }, `פרשת ${P.he || P.en}`), ` · ${P.en} · ${P.ref}`),
         P.approx ? h('p', { class: 'meta' }, "Sefaria didn't list the aliyot, so the parsha is divided into seven equal parts.") : null,
         h('div', { class: 'actions' },
-          h('a', { class: 'btn primary', href: refHash(mkRef(P.key, start)) }, 'Read ', h('span', { lang: 'he', dir: 'rtl' }, dayLabel(start))),
+          h('a', { class: 'btn primary', href: refHash(mkRef(P.key, start)) }, start ? 'Continue ' : 'Read ', h('span', { lang: 'he', dir: 'rtl' }, dayLabel(start))),
           dl, status)),
       h('section', { class: 'lib-section' }, h('h2', null, 'The week'), days),
       h('section', { class: 'lib-section' }, h('h2', null, 'Options'), shnOptionsEl(k => { if (k === 'font') return; renderShnayim(); })));
@@ -1987,7 +2014,7 @@
     if (hsh.startsWith('/c/')) return renderCategory(raw.slice(3).split('/').map(p => { try { return decodeURIComponent(p); } catch { return p; } }));
     if (hsh.startsWith('/b/')) return renderBook(hsh.slice(3));
     const ref = hsh.replace(/_/g, ' ').trim();
-    if (S.data && S.ref === ref && !S.loading) { setMode('reader'); hideMsg(); relayout(); return; }
+    if (S.data && S.ref === ref && !S.loading) { setMode('reader'); document.body.classList.toggle('is-mikra', !!S.data.mikra); hideMsg(); relayout(); return; }
     const hst = HIST.find(x => x.ref === ref);
     openRef(ref, hst ? hst.frac : 0);
   }

@@ -1,3 +1,6 @@
+/* Mekorot: a classic printed-style Rashi face (SIL Open Font License, see fonts/OFL-Mekorot.txt) */
+@font-face { font-family: "Mekorot"; font-weight: 400; font-style: normal; font-display: swap; src: url("fonts/Mekorot-Regular.woff2") format("woff2"); }
+@font-face { font-family: "Mekorot"; font-weight: 700; font-style: normal; font-display: swap; src: url("fonts/Mekorot-Bold.woff2") format("woff2"); }
 /* Two worlds share one page: a scrolling library (home, categories, book pages)
    and a fixed, full-screen paged reader. Colors are tokens; themes redefine them. */
 :root {
@@ -378,3 +381,5 @@ body.is-mikra.in-reader .mk-quick { display: block; }
 .mk-nav-prev { right: max(8px, env(safe-area-inset-right, 0px)); }
 body.is-mikra.in-reader .mk-nav { display: block; }
 @media print { .mk-nav { display: none !important; } }
+
+.mk-rashi-opts { display: contents; }

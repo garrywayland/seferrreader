@@ -18,7 +18,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="preconnect" href="https://www.sefaria.org" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Frank+Ruhl+Libre:wght@400;500;700&family=Crimson+Pro:ital,wght@0,400;0,600;1,400&display=swap">
-<link rel="stylesheet" href="styles.css?v=9">
+<link rel="stylesheet" href="styles.css?v=10">
 </head>
 <body class="in-lib">
 
@@ -97,8 +97,16 @@
     <div class="row comm-font">
       <span class="help">Commentary font</span>
       <div class="seg-group" id="m-commfont">
-        <button class="seg-btn" data-v="rashi">Rashi script</button>
+        <button class="seg-btn" data-v="classic">Classic Rashi</button>
+        <button class="seg-btn" data-v="modern">Modern</button>
         <button class="seg-btn" data-v="same">Regular</button>
+      </div>
+    </div>
+    <div class="row comm-font">
+      <span class="help">Vowels in commentary</span>
+      <div class="seg-group" id="m-commvowels">
+        <button class="seg-btn" data-v="off">Off</button>
+        <button class="seg-btn" data-v="on">On</button>
       </div>
     </div>
   </div>
@@ -291,6 +299,6 @@
 <div id="print" aria-hidden="true"></div>
 <style id="pstyle"></style>
 
-<script src="app.js?v=9"></script>
+<script src="app.js?v=10"></script>
 </body>
 </html>
