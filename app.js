@@ -30,6 +30,18 @@
   const SET = Object.assign({}, DEFAULTS, readJSON(KEY_SET, {}));
 
   SET.shn = Object.assign({ fmt: 'side', left: 'rashi-onk', twice: false, only: false, week: 'this', loc: 'auto', done: {}, last: null }, SET.shn);
+  // Shnayim Mikra keeps its own size, line spacing, margins and Hebrew font (starting from the general ones).
+  SET.shn.view = Object.assign({ size: SET.size, lh: SET.lh, margin: SET.margin, heFont: SET.heFont }, SET.shn.view);
+  const V = () => (S.data && S.data.mikra && !reader.hidden ? SET.shn.view : SET);
+  function applyLook() {
+    const v = V(), st = document.documentElement.style;
+    ensureFont(v.heFont);
+    st.setProperty('--he', `"${v.heFont}", "Frank Ruhl Libre", "Noto Serif Hebrew", "Times New Roman", serif`);
+    st.setProperty('--fs', v.size + 'px');
+    st.setProperty('--lh', String(v.lh));
+    st.setProperty('--mx', MARGINS[v.margin] + 'px');
+    st.setProperty('--my', (v.margin * 6) + 'px');
+  }
   if (SET.commFont === 'rashi') SET.commFont = 'classic';   // the old default (Noto Rashi) is now "modern"
   // The family used for commentary text, if it isn't the regular font.
   const rashiFam = () => (SET.commFont === 'classic' ? 'Mekorot' : SET.commFont === 'modern' ? 'Noto Rashi Hebrew' : null);
@@ -70,16 +82,12 @@
   function applySettings() {
     // Remember the current pasuk before the change reflows the text.
     if (S.data && !reader.hidden && !S.keep) S.keep = { a: getAnchor(), frac: S.pages > 1 ? S.page / S.pages : 0 };
-    ensureFont(SET.heFont); ensureFont(SET.enFont);
+    ensureFont(SET.enFont);
     const st = document.documentElement.style;
-    st.setProperty('--he', `"${SET.heFont}", "Frank Ruhl Libre", "Noto Serif Hebrew", "Times New Roman", serif`);
+    applyLook();
     st.setProperty('--en', `"${SET.enFont}", "Crimson Pro", Georgia, "Times New Roman", serif`);
-    st.setProperty('--fs', SET.size + 'px');
     if (rashiFam()) ensureFont(rashiFam());
     st.setProperty('--comm-he', SET.commFont === 'classic' ? '"Mekorot", "Noto Rashi Hebrew", var(--he)' : SET.commFont === 'modern' ? '"Noto Rashi Hebrew", var(--he)' : 'var(--he)');
-    st.setProperty('--lh', String(SET.lh));
-    st.setProperty('--mx', MARGINS[SET.margin] + 'px');
-    st.setProperty('--my', (SET.margin * 6) + 'px');
     if (SET.theme === 'auto') document.documentElement.removeAttribute('data-theme');
     else document.documentElement.setAttribute('data-theme', SET.theme);
     flow.classList.toggle('nonums', !SET.nums);
@@ -462,6 +470,7 @@
     document.body.classList.toggle('in-lib', !r);
     libEl.hidden = r; reader.hidden = !r; $('status').hidden = !r; $('bar').hidden = !r;
     if (!r) { hideMsg(); document.body.classList.remove('is-mikra'); }
+    applyLook();
   }
 
   const searchIcon = () => {
@@ -1162,6 +1171,7 @@
     }
     if (token !== S.loadToken) return;
     S.data = data; S.ref = /-/.test(data.ref) ? data.ref : data.sectionRef;
+    applyLook();
     document.title = `${data.ref} · Sefer Reader`;
     syncSection();
     S.commAvail = null;
@@ -1334,10 +1344,11 @@
   function pressGroup(id, v) { document.querySelectorAll(`#${id} .seg-btn`).forEach(b => b.setAttribute('aria-pressed', String(b.dataset.v === String(v)))); }
   function syncControls() {
     pressGroup('m-lang', SET.lang); pressGroup('m-theme', SET.theme); pressGroup('m-cols', SET.cols);
-    $('m-hefont').value = SET.heFont; $('m-enfont').value = SET.enFont;
-    $('m-size').value = SET.size; $('m-size-v').textContent = SET.size + 'px';
-    $('m-lh').value = SET.lh; $('m-lh-v').textContent = Number(SET.lh).toFixed(2);
-    $('m-margin').value = SET.margin; $('m-margin-v').textContent = ['None', 'Narrow', 'Normal', 'Wide', 'Wider', 'Widest'][SET.margin];
+    const v = V();
+    $('m-hefont').value = v.heFont; $('m-enfont').value = SET.enFont;
+    $('m-size').value = v.size; $('m-size-v').textContent = v.size + 'px';
+    $('m-lh').value = v.lh; $('m-lh-v').textContent = Number(v.lh).toFixed(2);
+    $('m-margin').value = v.margin; $('m-margin-v').textContent = ['None', 'Narrow', 'Normal', 'Wide', 'Wider', 'Widest'][v.margin];
     $('m-nums').checked = SET.nums;
     pressGroup('m-vowels', SET.vowels); pressGroup('m-align', SET.align); pressGroup('m-commfont', SET.commFont); pressGroup('m-commvowels', SET.commVowels);
     $('m-ahead').value = String(SET.ahead);
@@ -1653,11 +1664,11 @@
     toast('Open the file to add it to your calendar.');
   };
   $('m-ahead').onchange = e => { SET.ahead = Number(e.target.value); applySettings(); };
-  $('m-hefont').onchange = e => { SET.heFont = e.target.value; applySettings(); relayoutAfterFonts(); };
+  $('m-hefont').onchange = e => { V().heFont = e.target.value; applySettings(); relayoutAfterFonts(); };
   $('m-enfont').onchange = e => { SET.enFont = e.target.value; applySettings(); relayoutAfterFonts(); };
   let rangeRAF;
   const onRange = (key, conv) => e => {
-    SET[key] = conv(e.target.value); applySettings(); syncControls();
+    V()[key] = conv(e.target.value); applySettings(); syncControls();
     cancelAnimationFrame(rangeRAF); rangeRAF = requestAnimationFrame(relayout);
   };
   $('m-size').addEventListener('input', onRange('size', Number));
@@ -1874,6 +1885,7 @@
     S.data = { ref, heRef: `${P.he || P.en} · ${dayLabel(day)}`, sectionRef: ref, title: 'Shnayim Mikra', heTitle: 'שניים מקרא', he: [], en: [], next: null, prev: null,
       mikra: { key: P.key, day, parsha: P, range: P.aliyot[day], verses } };
     S.ref = ref; S.sections = []; S.shapeFor = null; S.cur = -1; S.commAvail = null; S.comm = null;
+    applyLook();
     document.title = `${P.en} · Shnayim Mikra`;
     document.body.classList.add('is-mikra');
     hideMsg();
@@ -1999,8 +2011,8 @@
   $('mk-quick').onclick = toggleOnly;
   $('mk-only').onchange = toggleOnly;
   $('mk-done').onclick = () => { const M = S.data.mikra; setDone(M.key, M.day, !doneArr(M.key)[M.day]); renderMikraMenu(); };
-  $('mk-smaller').onclick = () => { SET.size = Math.max(14, SET.size - 2); applySettings(); relayout(); };
-  $('mk-bigger').onclick = () => { SET.size = Math.min(56, SET.size + 2); applySettings(); relayout(); };
+  $('mk-smaller').onclick = () => { V().size = Math.max(14, V().size - 2); applySettings(); relayout(); };
+  $('mk-bigger').onclick = () => { V().size = Math.min(56, V().size + 2); applySettings(); relayout(); };
 
   // ================= Router =================
   function route() {
@@ -2014,7 +2026,7 @@
     if (hsh.startsWith('/c/')) return renderCategory(raw.slice(3).split('/').map(p => { try { return decodeURIComponent(p); } catch { return p; } }));
     if (hsh.startsWith('/b/')) return renderBook(hsh.slice(3));
     const ref = hsh.replace(/_/g, ' ').trim();
-    if (S.data && S.ref === ref && !S.loading) { setMode('reader'); document.body.classList.toggle('is-mikra', !!S.data.mikra); hideMsg(); relayout(); return; }
+    if (S.data && S.ref === ref && !S.loading) { setMode('reader'); document.body.classList.toggle('is-mikra', !!S.data.mikra); applyLook(); hideMsg(); relayout(); return; }
     const hst = HIST.find(x => x.ref === ref);
     openRef(ref, hst ? hst.frac : 0);
   }

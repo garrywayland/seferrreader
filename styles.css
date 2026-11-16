@@ -383,3 +383,9 @@ body.is-mikra.in-reader .mk-nav { display: block; }
 @media print { .mk-nav { display: none !important; } }
 
 .mk-rashi-opts { display: contents; }
+
+/* Shnayim Mikra: reserve a band at the top and bottom so the quick toggle and the day arrows never sit on the text */
+body.is-mikra #reader {
+  padding-top: calc(env(safe-area-inset-top, 0px) + 40px + var(--my));
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 40px + var(--my));
+}
