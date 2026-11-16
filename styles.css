@@ -403,3 +403,7 @@ body.is-mikra #reader {
 .dv-seg[hidden] { display: none; }
 .dv-seg .he { font-family: var(--he); font-size: 21px; line-height: 1.8; margin: 0 0 .3em; }
 .dv-seg .en { font-family: var(--en); font-size: 17px; line-height: 1.55; color: var(--muted); margin: 0; }
+
+.dv-filter { margin: 0 0 6px; }
+.dv-filter .lbl { margin-bottom: 6px; }
+.dv-filter .chips-row { margin-bottom: 8px; }

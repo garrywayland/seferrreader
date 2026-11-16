@@ -42,6 +42,7 @@
     st.setProperty('--mx', MARGINS[v.margin] + 'px');
     st.setProperty('--my', (v.margin * 6) + 'px');
   }
+  SET.dvar = Object.assign({ type: 'all', len: 'any' }, SET.dvar);   // Quick d'var Torah filters
   if (SET.commFont === 'rashi') SET.commFont = 'classic';   // the old default (Noto Rashi) is now "modern"
   // The family used for commentary text, if it isn't the regular font.
   const rashiFam = () => (SET.commFont === 'classic' ? 'Mekorot' : SET.commFont === 'modern' ? 'Noto Rashi Hebrew' : null);
@@ -2052,6 +2053,57 @@
     return out;
   });
 
+  // ---- Filters. Type comes from Sefaria's index for the source (its category and era); length is
+  // measured from the text (Hebrew words, or English words / 2.4 when there is no Hebrew).
+  const DV_TYPES = [['all', 'All'], ['midrash', 'Midrash'], ['rishonim', 'Rishonim'], ['acharonim', 'Acharonim'], ['other', 'Talmud, Zohar & more']];
+  const DV_LENS = [['any', 'Any length'], ['short', 'Short'], ['medium', 'Medium'], ['long', 'Long']];
+  const DV_TYPE_LABEL = { midrash: 'Midrash', rishonim: 'Rishonim', acharonim: 'Acharonim', other: 'Talmud, Zohar & more' };
+  function classifyIdx(idx) {
+    const cats = idx.categories || [], c0 = cats[0], era = idx.era || '';
+    if (c0 === 'Midrash') return 'midrash';
+    if (['Talmud', 'Mishnah', 'Tosefta', 'Kabbalah', 'Second Temple', 'Reference', 'Liturgy'].includes(c0) || cats.includes('Targum')) return 'other';
+    if (era === 'RI' || cats.some(c => /^Rishonim/.test(c))) return 'rishonim';
+    if (era === 'AH' || cats.some(c => /^Acharonim/.test(c))) return 'acharonim';
+    return 'other';
+  }
+  // "Midrash Tanchuma, Vayetzei 8:3-4" -> ["Midrash Tanchuma, Vayetzei", "Midrash Tanchuma"]
+  function baseTitles(ref) {
+    let t = (String(ref).match(/^(.+?)[ ,]+\d/) || [, ref])[1];
+    const out = [t];
+    while (t.includes(',')) { t = t.slice(0, t.lastIndexOf(',')).trim(); out.push(t); }
+    return out;
+  }
+  const dvType = c => once('dvt:' + c.ref, async () => {
+    for (const t of baseTitles(c.ref)) {
+      try { const idx = await getIndex(t); if (idx && idx.categories) return classifyIdx(idx); } catch { /* try the shorter title */ }
+    }
+    return 'other';
+  });
+  const wc = arr => (arr || []).join(' ').replace(/<[^>]+>/g, ' ').split(/\s+/).filter(Boolean).length;
+  const lenBucket = w => (w <= 60 ? 'short' : w <= 200 ? 'medium' : 'long');
+  const dvLen = c => once('dvl:' + c.ref, async () => {
+    const d = await getText(c.ref);
+    const w = wc(d.he) || Math.round(wc(d.en) / 2.4);
+    return { words: w, len: lenBucket(w) };
+  });
+  // Walk the ranked list, checking a few sources at a time, until there are `need` matches.
+  async function dvarMatches(list, type, len, need, progress) {
+    const out = [], BATCH = 6;
+    for (let i = 0; i < list.length && out.length < need; i += BATCH) {
+      const batch = list.slice(i, i + BATCH);
+      const metas = await Promise.all(batch.map(async c => ({
+        type: type !== 'all' ? await dvType(c).catch(() => 'other') : null,
+        ...(len !== 'any' ? (await dvLen(c).catch(() => null)) || { len: null } : {}),
+      })));
+      batch.forEach((c, k) => {
+        const m = metas[k];
+        if ((type === 'all' || m.type === type) && (len === 'any' || m.len === len)) out.push({ ...c, ...m });
+      });
+      if (progress) progress(Math.min(i + BATCH, list.length), list.length);
+    }
+    return out;
+  }
+
   async function renderDvar(params) {
     const tok = ++viewToken;
     setMode('lib');
@@ -2064,40 +2116,73 @@
     catch (e) { if (tok === viewToken) body.replaceChildren(errorEl(e, () => renderDvar(params))); return; }
     if (tok !== viewToken) return;
     if (!P || !list.length) { body.replaceChildren(h('p', { class: 'res-status' }, "Sefaria doesn't list any popular sources for this parsha.")); return; }
-    const n0 = params.get('n');
-    const n = n0 != null && /^\d+$/.test(n0) ? Number(n0) % list.length : new Date().getDay() % list.length;
-    const pick = list[n];
-    const go = i => { location.hash = '#/dvar?n=' + (((i % list.length) + list.length) % list.length); };
-    const days = h('div', { class: 'chips-row' }, DAY_LET.map((d, i) => i >= list.length ? null :
-      h('button', { type: 'button', class: 'chip-btn', 'aria-pressed': String(i === n), onclick: () => go(i) }, h('span', { class: 'ch-he', lang: 'he' }, i === 6 ? 'שבת' : 'יום ' + d))));
-    const text = h('div', { class: 'dv-text' }, loadingEl('Loading the source…'));
+    const F = SET.dvar, n0 = params.get('n');
+    const n = n0 != null && /^\d+$/.test(n0) ? Number(n0) : new Date().getDay();
+    const setF = (k, v) => { SET.dvar[k] = v; writeJSON(KEY_SET, SET); try { history.replaceState(null, '', '#/dvar'); } catch {} renderDvar(new URLSearchParams()); };
+    const group = (label, key, items, hints) => h('div', { class: 'dv-filter' }, h('span', { class: 'lbl' }, label),
+      h('div', { class: 'chips-row' }, items.map(([v, t]) => h('button', { type: 'button', class: 'chip-btn', 'aria-pressed': String(F[key] === v), title: (hints && hints[v]) || null, onclick: () => setF(key, v) }, t))));
+    const status = h('p', { class: 'res-status' });
+    const result = h('div', null);
     body.replaceChildren(
       h('div', { class: 'page-head', style: '--c:#7a5aa8' },
         h('div', { class: 'names' }, h('h1', null, "Quick d'var Torah"), h('span', { class: 'he-name', lang: 'he' }, 'דבר תורה קצר')),
         h('p', { class: 'desc' }, h('span', { lang: 'he', dir: 'rtl', class: 'mk-parsha' }, `פרשת ${P.he || P.en}`), ` · ${P.en}`),
         h('p', { class: 'meta' }, "A popular source on this week's parsha, not Rashi. Sefaria's editors pick a few for each parsha; the rest are ranked by how often other sources refer to them.")),
+      group('Type', 'type', DV_TYPES),
+      group('Length', 'len', DV_LENS, { short: 'Up to about 60 words: under a minute', medium: 'About 60 to 200 words', long: 'More than 200 words' }),
+      status, result);
+    let matches;
+    try {
+      matches = await dvarMatches(list, F.type, F.len, Math.max(n + 2, 8), (i, total) => { if (tok === viewToken && (F.type !== 'all' || F.len !== 'any')) status.textContent = `Checking sources… ${i} of ${total}`; });
+    } catch (e) { if (tok === viewToken) { status.textContent = ''; result.replaceChildren(errorEl(e, () => renderDvar(params))); } return; }
+    if (tok !== viewToken) return;
+    status.textContent = '';
+    if (!matches.length) {
+      // Say what IS available, using what was just checked.
+      let hint = '';
+      if (F.type !== 'all' && F.len !== 'any') {
+        const metas = await Promise.all(list.map(async c => ({ type: await dvType(c).catch(() => 'other'), len: ((await dvLen(c).catch(() => null)) || {}).len })));
+        if (tok !== viewToken) return;
+        const order = ['short', 'medium', 'long'];
+        const lens = order.filter(l => metas.some(m => m.type === F.type && m.len === l));
+        const types = DV_TYPES.slice(1).filter(([v]) => metas.some(m => m.type === v && m.len === F.len)).map(([, t]) => t);
+        hint = ` ${DV_TYPE_LABEL[F.type]} sources on this parsha are ${lens.length ? lens.join(' or ') : 'not available'}.` + (types.length ? ` ${F.len[0].toUpperCase() + F.len.slice(1)} ones are: ${types.join(', ')}.` : '');
+      }
+      result.replaceChildren(h('p', { class: 'res-status' }, 'No sources on this parsha match those choices.' + hint));
+      return;
+    }
+    const idx = n % matches.length, pick = matches[idx];
+    const go = i => { location.hash = '#/dvar?n=' + (((i % matches.length) + matches.length) % matches.length); };
+    const days = h('div', { class: 'chips-row' }, DAY_LET.map((d, i) => i >= matches.length ? null :
+      h('button', { type: 'button', class: 'chip-btn', 'aria-pressed': String(i === idx), onclick: () => go(i) }, h('span', { class: 'ch-he', lang: 'he' }, i === 6 ? 'שבת' : 'יום ' + d))));
+    const badges = h('div', { class: 'dv-badges' }, pick.curated ? h('span', { class: 'dv-badge' }, "Editor's pick") : h('span', { class: 'dv-badge soft' }, 'Widely referenced'));
+    const addBadge = (t, soft = true) => badges.append(h('span', { class: 'dv-badge' + (soft ? ' soft' : '') }, t));
+    dvType(pick).then(tp => { if (tok === viewToken) addBadge(DV_TYPE_LABEL[tp]); }).catch(() => {});
+    const text = h('div', { class: 'dv-text' }, loadingEl('Loading the source…'));
+    result.replaceChildren(
       days,
-      h('article', { class: 'dv-card' },
-        h('div', { class: 'dv-badges' }, pick.curated ? h('span', { class: 'dv-badge' }, "Editor's pick") : h('span', { class: 'dv-badge soft' }, 'Widely referenced')),
+      h('article', { class: 'dv-card' }, badges,
         h('h2', { class: 'dv-title' }, pick.title || pick.ref),
         pick.blurb ? h('p', { class: 'dv-blurb' }, pick.blurb) : null,
         h('p', { class: 'dv-src' }, h('span', { class: 'dv-ref' }, pick.ref)),
         text,
         h('div', { class: 'actions' },
           h('a', { class: 'btn primary', href: refHash(pick.ref) }, 'Read in the reader'),
-          h('button', { class: 'btn', onclick: () => go(n + 1) }, 'Another source'),
+          h('button', { class: 'btn', onclick: () => go(idx + 1) }, 'Another source'),
           h('a', { class: 'btn', href: sefariaUrl(pick.ref), target: '_blank', rel: 'noopener' }, 'Open on Sefaria'))),
       h('section', { class: 'lib-section' }, h('h2', null, 'More sources on this parsha'),
-        h('div', { class: 'list' }, list.map((it, i) => i === n ? null :
+        h('div', { class: 'list' }, matches.map((it, i) => i === idx ? null :
           h('a', { class: 'item', href: '#/dvar?n=' + i },
             h('span', { class: 'item-en' }, it.title || it.ref),
-            h('span', { class: 'item-he', lang: 'he' }, it.curated ? "editor's pick" : ''),
+            h('span', { class: 'item-he' }, [it.curated ? "editor's pick" : '', it.type && it.type !== 'all' ? DV_TYPE_LABEL[it.type] : '', it.words ? `~${it.words} words` : ''].filter(Boolean).join(' · ')),
             h('span', { class: 'item-desc' }, it.title ? it.ref : ''))))));
     // The source text (the first part; the reader has the rest)
     try {
       const d = await getText(pick.ref);
       if (tok !== viewToken) return;
       const he = d.he, en = d.en, len = Math.max(he.length, en.length), LIM = 8, paras = [];
+      const w = wc(he) || Math.round(wc(en) / 2.4);
+      addBadge(`~${w} words · ${w <= 60 ? 'short' : w <= 200 ? 'medium' : 'long'}`);
       for (let i = 0; i < len; i++) {
         if (!he[i] && !en[i]) continue;
         paras.push(h('div', { class: 'dv-seg' },
