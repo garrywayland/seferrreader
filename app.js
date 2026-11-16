@@ -554,6 +554,9 @@
         const last = SET.shn.last, day = last && last.key === k ? last.day : 0;
         items = [{ title: { en: 'Shnayim Mikra', he: 'שניים מקרא' }, displayValue: { he: (pa.displayValue.he || pa.displayValue.en) + (day ? ` · ${dayLabel(day)}` : ''), en: `${pa.displayValue.en} · ${n} of 7 days done` }, ref: '', href: refHash(mkRef(k, day)) }, ...items];
       }
+      if (pa && pa.displayValue) {
+        items = [items[0], { title: { en: "Quick d'var Torah", he: 'דבר תורה קצר' }, displayValue: { he: pa.displayValue.he || pa.displayValue.en, en: `${pa.displayValue.en} · a popular source, not Rashi` }, ref: '', href: '#/dvar' }, ...items.slice(1)];
+      }
       const cards = items.map(it => {
         const key = it.title.en;
         const a = h('a', { class: 'yomi-card' + (SET.yomiHidden.includes(key) ? ' off' : ''), href: it.href || refHash(it.ref) },
@@ -1752,7 +1755,8 @@
     let aliyot = sevenDays(it.extraDetails && it.extraDetails.aliyot);
     let approx = false;
     if (!aliyot) { aliyot = await splitEven(it.ref); approx = true; }
-    return { key: slug(en), en, he, ref: it.ref, heRef: it.heRef || '', aliyot, approx };
+    const haf = items.find(i => /haftar/i.test((i.title && i.title.en) || ''));
+    return { key: slug(en), en, he, ref: it.ref, heRef: it.heRef || '', aliyot, approx, haf: haf ? haf.ref : '' };
   });
 
   // Rashi and Onkelos for every pasuk of one chapter: Map(verse index -> {rashi: [{ref, he}], onk}).
@@ -1962,7 +1966,7 @@
         P.approx ? h('p', { class: 'meta' }, "Sefaria didn't list the aliyot, so the parsha is divided into seven equal parts.") : null,
         h('div', { class: 'actions' },
           h('a', { class: 'btn primary', href: refHash(mkRef(P.key, start)) }, start ? 'Continue ' : 'Read ', h('span', { lang: 'he', dir: 'rtl' }, dayLabel(start))),
-          dl, status)),
+          h('a', { class: 'btn', href: '#/dvar' }, "Quick d'var Torah"), dl, status)),
       h('section', { class: 'lib-section' }, h('h2', null, 'The week'), days),
       h('section', { class: 'lib-section' }, h('h2', null, 'Options'), shnOptionsEl(k => { if (k === 'font') return; renderShnayim(); })));
   }
@@ -2014,6 +2018,104 @@
   $('mk-smaller').onclick = () => { V().size = Math.max(14, V().size - 2); applySettings(); relayout(); };
   $('mk-bigger').onclick = () => { V().size = Math.min(56, V().size + 2); applySettings(); relayout(); };
 
+  // ================= Quick d'var Torah =================
+  // One popular source on the week's parsha for each day (not Rashi, not the Torah text itself).
+  // Sefaria ranks the sources on each parsha's topic page: editors curate a handful with a title and
+  // blurb, and the rest are ordered by how often they are referenced (a PageRank-style score).
+  const PARSHIYOT = [['parashat-bereshit','Genesis 1:1-6:8'],['parashat-noach','Genesis 6:9-11:32'],['parashat-lech-lecha','Genesis 12:1-17:27'],['parashat-vayera','Genesis 18:1-22:24'],['parashat-chayei-sarah','Genesis 23:1-25:18'],['parashat-toldot','Genesis 25:19-28:9'],['parashat-vayetzei','Genesis 28:10-32:3'],['parashat-vayishlach','Genesis 32:4-36:43'],['parashat-vayeshev','Genesis 37:1-40:23'],['parashat-miketz','Genesis 41:1-44:17'],['parashat-vayigash','Genesis 44:18-47:27'],['parashat-vayechi','Genesis 47:28-50:26'],['parashat-shemot','Exodus 1:1-6:1'],['parashat-vaera','Exodus 6:2-9:35'],['parashat-bo','Exodus 10:1-13:16'],['parashat-beshalach','Exodus 13:17-17:16'],['parashat-yitro','Exodus 18:1-20:23'],['parashat-mishpatim','Exodus 21:1-24:18'],['parashat-terumah','Exodus 25:1-27:19'],['parashat-tetzaveh','Exodus 27:20-30:10'],['parashat-ki-tisa','Exodus 30:11-34:35'],['parashat-vayakhel','Exodus 35:1-38:20'],['parashat-pekudei','Exodus 38:21-40:38'],['parashat-vayikra','Leviticus 1:1-5:26'],['parashat-tzav','Leviticus 6:1-8:36'],['parashat-shemini','Leviticus 9:1-11:47'],['parashat-tazria','Leviticus 12:1-13:59'],['parashat-metzora','Leviticus 14:1-15:33'],['parashat-achrei-mot','Leviticus 16:1-18:30'],['parashat-kedoshim','Leviticus 19:1-20:27'],['parashat-emor','Leviticus 21:1-24:23'],['parashat-behar','Leviticus 25:1-26:2'],['parashat-bechukotai','Leviticus 26:3-27:34'],['parashat-bamidbar','Numbers 1:1-4:20'],['parashat-naso','Numbers 4:21-7:89'],['parashat-behaalotcha','Numbers 8:1-12:16'],['parashat-shelach','Numbers 13:1-15:41'],['parashat-korach','Numbers 16:1-18:32'],['parashat-chukat','Numbers 19:1-22:1'],['parashat-balak','Numbers 22:2-25:9'],['parashat-pinchas','Numbers 25:10-30:1'],['parashat-matot','Numbers 30:2-32:42'],['parashat-masei','Numbers 33:1-36:13'],['parashat-devarim','Deuteronomy 1:1-3:22'],['parashat-vaetchanan','Deuteronomy 3:23-7:11'],['parashat-eikev','Deuteronomy 7:12-11:25'],['parashat-reeh','Deuteronomy 11:26-16:17'],['parashat-shoftim','Deuteronomy 16:18-21:9'],['parashat-ki-teitzei','Deuteronomy 21:10-25:19'],['parashat-ki-tavo','Deuteronomy 26:1-29:8'],['parashat-nitzavim','Deuteronomy 29:9-30:20'],['parashat-vayeilech','Deuteronomy 31:1-30'],['parashat-haazinu','Deuteronomy 32:1-52'],['parashat-vzot-haberachah','Deuteronomy 33:1-34:12']];
+  const CHUMASH = new Set(['Genesis', 'Exodus', 'Leviticus', 'Numbers', 'Deuteronomy']);
+  const vAt = (c, v) => c * 1000 + v;
+  function parshaTopics(ref) {
+    const R = parseRange(ref);
+    if (!R) return [];
+    return PARSHIYOT.filter(([, r]) => {
+      const X = parseRange(r);
+      return X && X.book === R.book && vAt(X.c1, X.v1) >= vAt(R.c1, R.v1) && vAt(X.c1, X.v1) <= vAt(R.c2, R.v2);
+    }).map(x => x[0]);
+  }
+  const getTopic = slug => once('topic:' + slug, () => getJSON(`${API}/topics/${slug}?with_refs=1`));
+  const getDvar = P => once('dvar:' + P.ref, async () => {
+    const slugs = parshaTopics(P.ref);
+    if (!slugs.length) return [];
+    const tops = await Promise.all(slugs.map(getTopic));
+    const hafBook = P.haf ? (P.haf.match(/^(.+?) \d/) || [])[1] : null;
+    const seen = new Set(), out = [];
+    tops.forEach(t => (t.refs || []).forEach(r => {
+      if (r.is_sheet || !r.ref || seen.has(r.ref)) return;
+      const title = (r.ref.match(/^(.+?)[ ,]+\d/) || [, r.ref])[1];
+      if (CHUMASH.has(title) || /^Rashi on /i.test(title) || title === hafBook) return;
+      seen.add(r.ref);
+      const o = r.order || {}, d = (r.descriptions && r.descriptions.en) || {};
+      out.push({ ref: r.ref, title: d.title || '', blurb: d.prompt || '', curated: !!d.title, cur: (o.curatedPrimacy && o.curatedPrimacy.en) || 0, pr: o.pr || 0, tfidf: o.tfidf || 0 });
+    }));
+    out.sort((a, b) => (b.curated - a.curated) || (b.cur - a.cur) || (b.pr - a.pr) || (b.tfidf - a.tfidf));
+    return out;
+  });
+
+  async function renderDvar(params) {
+    const tok = ++viewToken;
+    setMode('lib');
+    document.title = "Quick d'var Torah · Sefer Reader";
+    const body = h('div', null, loadingEl("Finding this week's sources…"));
+    setLib(masthead(), crumbs([], "Quick d'var Torah"), body, foot());
+    window.scrollTo(0, 0);
+    let P, list;
+    try { P = await getParsha(); list = P ? await getDvar(P) : []; }
+    catch (e) { if (tok === viewToken) body.replaceChildren(errorEl(e, () => renderDvar(params))); return; }
+    if (tok !== viewToken) return;
+    if (!P || !list.length) { body.replaceChildren(h('p', { class: 'res-status' }, "Sefaria doesn't list any popular sources for this parsha.")); return; }
+    const n0 = params.get('n');
+    const n = n0 != null && /^\d+$/.test(n0) ? Number(n0) % list.length : new Date().getDay() % list.length;
+    const pick = list[n];
+    const go = i => { location.hash = '#/dvar?n=' + (((i % list.length) + list.length) % list.length); };
+    const days = h('div', { class: 'chips-row' }, DAY_LET.map((d, i) => i >= list.length ? null :
+      h('button', { type: 'button', class: 'chip-btn', 'aria-pressed': String(i === n), onclick: () => go(i) }, h('span', { class: 'ch-he', lang: 'he' }, i === 6 ? 'שבת' : 'יום ' + d))));
+    const text = h('div', { class: 'dv-text' }, loadingEl('Loading the source…'));
+    body.replaceChildren(
+      h('div', { class: 'page-head', style: '--c:#7a5aa8' },
+        h('div', { class: 'names' }, h('h1', null, "Quick d'var Torah"), h('span', { class: 'he-name', lang: 'he' }, 'דבר תורה קצר')),
+        h('p', { class: 'desc' }, h('span', { lang: 'he', dir: 'rtl', class: 'mk-parsha' }, `פרשת ${P.he || P.en}`), ` · ${P.en}`),
+        h('p', { class: 'meta' }, "A popular source on this week's parsha, not Rashi. Sefaria's editors pick a few for each parsha; the rest are ranked by how often other sources refer to them.")),
+      days,
+      h('article', { class: 'dv-card' },
+        h('div', { class: 'dv-badges' }, pick.curated ? h('span', { class: 'dv-badge' }, "Editor's pick") : h('span', { class: 'dv-badge soft' }, 'Widely referenced')),
+        h('h2', { class: 'dv-title' }, pick.title || pick.ref),
+        pick.blurb ? h('p', { class: 'dv-blurb' }, pick.blurb) : null,
+        h('p', { class: 'dv-src' }, h('span', { class: 'dv-ref' }, pick.ref)),
+        text,
+        h('div', { class: 'actions' },
+          h('a', { class: 'btn primary', href: refHash(pick.ref) }, 'Read in the reader'),
+          h('button', { class: 'btn', onclick: () => go(n + 1) }, 'Another source'),
+          h('a', { class: 'btn', href: sefariaUrl(pick.ref), target: '_blank', rel: 'noopener' }, 'Open on Sefaria'))),
+      h('section', { class: 'lib-section' }, h('h2', null, 'More sources on this parsha'),
+        h('div', { class: 'list' }, list.map((it, i) => i === n ? null :
+          h('a', { class: 'item', href: '#/dvar?n=' + i },
+            h('span', { class: 'item-en' }, it.title || it.ref),
+            h('span', { class: 'item-he', lang: 'he' }, it.curated ? "editor's pick" : ''),
+            h('span', { class: 'item-desc' }, it.title ? it.ref : ''))))));
+    // The source text (the first part; the reader has the rest)
+    try {
+      const d = await getText(pick.ref);
+      if (tok !== viewToken) return;
+      const he = d.he, en = d.en, len = Math.max(he.length, en.length), LIM = 8, paras = [];
+      for (let i = 0; i < len; i++) {
+        if (!he[i] && !en[i]) continue;
+        paras.push(h('div', { class: 'dv-seg' },
+          he[i] ? h('p', { class: 'he', dir: 'rtl', lang: 'he' }, clean(prepComm(he[i]))) : null,
+          en[i] ? h('p', { class: 'en', lang: 'en' }, clean(en[i])) : null));
+      }
+      const kids = paras.slice(0, LIM), rest = paras.slice(LIM);
+      if (rest.length) {
+        rest.forEach(r => { r.hidden = true; kids.push(r); });
+        const more = h('button', { class: 'btn', onclick: () => { rest.forEach(r => { r.hidden = false; }); more.remove(); } }, `Show the rest (${rest.length} more)`);
+        kids.push(more);
+      }
+      text.replaceChildren(...(kids.length ? kids : [h('p', { class: 'res-status' }, 'This source has no text on Sefaria.')]));
+    } catch (e) {
+      if (tok === viewToken) text.replaceChildren(errorEl(e, () => renderDvar(params)));
+    }
+  }
+
   // ================= Router =================
   function route() {
     closeMenu();
@@ -2022,6 +2124,7 @@
     try { hsh = decodeURIComponent(raw); } catch { hsh = raw; }
     if (!hsh || hsh === '/') return renderHome();
     if (hsh === '/shnayim') return renderShnayim();
+    if (/^\/dvar(\?|$)/.test(raw)) return renderDvar(new URLSearchParams(raw.includes('?') ? raw.slice(raw.indexOf('?') + 1) : ''));
     if (/^\/s(\?|$)/.test(raw)) return renderSearch(new URLSearchParams(raw.includes('?') ? raw.slice(raw.indexOf('?') + 1) : ''));
     if (hsh.startsWith('/c/')) return renderCategory(raw.slice(3).split('/').map(p => { try { return decodeURIComponent(p); } catch { return p; } }));
     if (hsh.startsWith('/b/')) return renderBook(hsh.slice(3));

@@ -389,3 +389,17 @@ body.is-mikra #reader {
   padding-top: calc(env(safe-area-inset-top, 0px) + 40px + var(--my));
   padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 40px + var(--my));
 }
+
+/* ---------------- Quick d'var Torah ---------------- */
+.dv-card { margin: 18px 0 34px; padding: 20px 20px 22px; border: 1px solid var(--rule); border-radius: 16px; background: var(--panel); }
+.dv-badges { margin-bottom: 8px; }
+.dv-badge { display: inline-block; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; padding: .2em .7em; border-radius: 999px; background: var(--accent); color: var(--bg); }
+.dv-badge.soft { background: none; color: var(--muted); border: 1px solid var(--rule); }
+.dv-title { font-family: var(--en); font-size: clamp(24px, 4.4vw, 32px); line-height: 1.15; margin: 0 0 8px; text-wrap: balance; }
+.dv-blurb { margin: 0 0 12px; font-size: 16px; line-height: 1.55; }
+.dv-src { margin: 0 0 14px; color: var(--muted); font-size: 14px; }
+.dv-text { margin: 0 0 6px; max-width: 42em; }
+.dv-seg { margin: 0 0 1.1em; }
+.dv-seg[hidden] { display: none; }
+.dv-seg .he { font-family: var(--he); font-size: 21px; line-height: 1.8; margin: 0 0 .3em; }
+.dv-seg .en { font-family: var(--en); font-size: 17px; line-height: 1.55; color: var(--muted); margin: 0; }
